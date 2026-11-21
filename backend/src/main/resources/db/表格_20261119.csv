@@ -1,0 +1,15 @@
+﻿#,表,作用,关键 AC
+1,game_type,游戏类型字典（筛选、搜索复用）,AC-3.1、AC-2.2
+2,game,游戏主数据,AC-1.1、AC-11.1~11.4
+3,platform,平台信息（区域 / 币种 / 链接模板 / 数据源 / 启用）,AC-13.1~13.4、AC-7.2
+4,price_record,价格记录（全站核心）,AC-4.x、AC-12.x、AC-5.2
+5,exchange_rate_snapshot,汇率快照,AC-4.5、AC-4.6、AC-4.7
+6,historical_low,第三方史低（独立表，不参与最低价）,AC-5.3、AC-14.2
+7,game_platform,游戏 × 平台关联（外部 ID、商店链接、是否上架）,AC-4.3、AC-7.1~7.3
+8,region_risk,锁区风险等级与来源,AC-6.2~6.4
+9,sys_user,账号（含防爆破字段）,AC-8.1~8.6
+10,favorite,收藏,AC-9.1~9.4
+11,alert_rule,提醒规则（三种类型 + 基准价 + 去重锚点）,AC-10.1、10.5、10.7
+12,notification,站内通知,AC-10.2、10.6
+13,admin_audit_log,后台操作留痕,AC-14.4
+14,collect_task_log,采集任务日志与告警,AC-12.3

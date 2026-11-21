@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.gameprice.price.mapper.PriceRecordMapper">
+
+    <!-- 定义结果映射，将数据库列映射到CurrentPriceRow对象属性 -->
+<!--
+  MyBatis ResultMap映射配置
+  用于定义数据库结果集与Java对象之间的映射关系
+  本映射对应CurrentPriceRow实体类，用于处理游戏价格相关数据
+-->
+    <resultMap id="CurrentPriceRowMap" type="com.gameprice.price.dto.CurrentPriceRow">
+    <!-- 游戏ID映射 -->
+        <result column="game_id"           property="gameId"/>
+    <!-- 平台ID映射 -->
+        <result column="platform_id"       property="platformId"/>
+    <!-- 平台代码映射 -->
+        <result column="platform_code"     property="platformCode"/>
+    <!-- 平台名称映射 -->
+        <result column="platform_name"     property="platformName"/>
+    <!-- 平台区域映射 -->
+        <result column="platform_region"   property="platformRegion"/>
+    <!-- 货币类型映射 -->
+        <result column="currency"          property="currency"/>
+    <!-- 原始金额映射 -->
+        <result column="original_amount"   property="originalAmount"/>
+    <!-- 原始价格映射 -->
+        <result column="original_price"    property="originalPrice"/>
+    <!-- 人民币金额映射 -->
+        <result column="cny_amount"        property="cnyAmount"/>
+    <!-- 折扣率映射 -->
+        <result column="discount_rate"     property="discountRate"/>
+    <!-- 折扣结束时间映射 -->
+        <result column="discount_end_time" property="discountEndTime"/>
+    <!-- 汇率映射 -->
+        <result column="rate"              property="rate"/>
+    <!-- 汇率更新时间映射 -->
+        <result column="rate_time"         property="rateTime"/>
+    <!-- 记录时间映射 -->
+        <result column="recorded_at"       property="recordedAt"/>
+    </resultMap>
+
+    <!-- 查询当前价格信息的方法 -->
+    <select id="selectCurrentPrices" resultMap="CurrentPriceRowMap">
+        SELECT p.game_id,
+        p.platform_id,
+        pf.code             AS platform_code,  -- 平台编码
+        pf.name             AS platform_name,  -- 平台名称
+        pf.region           AS platform_region, -- 平台区域
+        p.currency,          -- 货币类型
+        p.original_amount,   -- 原始价格
+        p.original_price,    -- 商品原始价格
+        p.cny_amount,        -- 人民币价格
+        p.discount_rate,     -- 折扣率
+        p.discount_end_time, -- 折扣结束时间
+        p.rate,              -- 汇率
+        p.rate_time,         -- 汇率更新时间
+        p.recorded_at        -- 记录时间
+        FROM price_record p
+        JOIN platform pf
+        ON pf.id = p.platform_id  -- 关联平台表
+        AND pf.enabled = 1       -- 平台启用状态
+        AND pf.api_ready = 1     -- 检查API是否准备就绪
+        AND pf.deleted = 0       -- 平台未删除
+        WHERE p.is_current = 1   -- 当前价格记录
+        AND p.status = 1         -- 记录状态正常
+        AND p.game_id IN          -- 游戏ID列表
+        <foreach collection="gameIds" item="gid" open="(" separator="," close=")">
+            #{gid}
+        </foreach>
+        ORDER BY p.game_id, p.cny_amount  -- 按游戏ID和人民币价格排序
+    </select>
+
+    <resultMap id="PriceHistoryRowMap" type="com.gameprice.price.dto.PriceHistoryRow">
+        <result column="game_id"       property="gameId"/>
+        <result column="platform_id"   property="platformId"/>
+        <result column="platform_code" property="platformCode"/>
+        <result column="platform_name" property="platformName"/>
+        <result column="currency"      property="currency"/>
+        <result column="cny_amount"    property="cnyAmount"/>
+        <result column="recorded_at"   property="recordedAt"/>
+        <result column="is_current"    property="isCurrent"/>
+    </resultMap>
+
+    <select id="selectHistory" resultMap="PriceHistoryRowMap">
+        SELECT p.game_id,
+        p.platform_id,
+        pf.code AS platform_code,
+        pf.name AS platform_name,
+        p.currency,
+        p.cny_amount,
+        p.recorded_at,
+        p.is_current
+        FROM price_record p
+        JOIN platform pf
+        ON pf.id = p.platform_id
+        AND pf.enabled = 1
+        AND pf.api_ready = 1
+        AND pf.deleted = 0
+        WHERE p.game_id = #{gameId}
+        AND p.status = 1
+        AND p.recorded_at &gt;= #{fromTime}
+        <if test="platformId != null">
+            AND p.platform_id = #{platformId}
+        </if>
+        ORDER BY p.platform_id ASC, p.recorded_at ASC, p.id ASC
+    </select>
+
+
+</mapper>

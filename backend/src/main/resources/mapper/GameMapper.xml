@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.gameprice.game.mapper.GameMapper">
+
+    <!-- 当前最低价表达式：与 selectCurrentPrices 口径完全一致 -->
+<!--
+    这是一个SQL查询片段，定义了一个名为"minPriceExpr"的SQL表达式
+    该查询用于查找特定游戏ID的最低价格
+    它通过子查询从price_record表和platform表中筛选出符合条件的记录
+-->
+    <sql id="minPriceExpr">
+
+    <!-- 使用子查询查找最低价格 -->
+        (SELECT MIN(p2.cny_amount)  <!-- 计算price_record表中cny_amount字段的最小值 -->
+        FROM price_record p2        <!-- 别名p2引用price_record表 -->
+        JOIN platform pf2           <!-- 别名pf2引用platform表，进行内连接 -->
+        ON pf2.id = p2.platform_id  <!-- 连接条件：platform表的id等于price_record表的platform_id -->
+        AND pf2.enabled = 1         <!-- 筛选条件：platform表中的enabled字段为1 -->
+        AND pf2.api_ready = 1       <!-- 筛选条件：platform表中的api_ready字段为1 -->
+        AND pf2.deleted = 0         <!-- 筛选条件：platform表中的deleted字段为0 -->
+        WHERE p2.game_id = g.id     <!-- 筛选条件：price_record表中的game_id等于外部传入的游戏ID -->
+        AND p2.is_current = 1       <!-- 筛选条件：price_record表中的is_current字段为1 -->
+        AND p2.status = 1)          <!-- 筛选条件：price_record表中的status字段为1 -->
+    </sql>
+
+<!--
+ * 游戏列表查询SQL
+ * 功能：根据多种条件查询游戏列表，包括关键字搜索、类型筛选、平台筛选、价格区间和折扣筛选等
+ * 参数：通过q对象传入查询条件
+ * 返回：符合条件的游戏列表
+-->
+    <select id="selectAppPage" resultType="com.gameprice.game.entity.Game">
+        SELECT g.*  <!-- 查询游戏的所有字段 -->
+        FROM game g  <!-- 从游戏表查询 -->
+        WHERE g.status = 1  <!-- 只查询状态为1（上架）的游戏 -->
+
+        <!-- AC-2.1 / AC-2.2：名称、英文名、类型名模糊命中；大小写与空格不敏感 -->
+        <if test="q.keywordNorm != null and q.keywordNorm != ''">
+            AND (
+        <!-- 游戏名称模糊匹配，忽略大小写和空格 -->
+            REPLACE(LOWER(g.name), ' ', '') LIKE CONCAT('%', #{q.keywordNorm}, '%')
+        <!-- 游戏英文名模糊匹配，忽略大小写和空格 -->
+            OR REPLACE(LOWER(IFNULL(g.name_en, '')), ' ', '') LIKE CONCAT('%', #{q.keywordNorm}, '%')
+        <!-- 如果指定了游戏类型ID，则匹配这些类型 -->
+            <if test="q.keywordTypeIds != null and q.keywordTypeIds.size() > 0">
+                OR g.game_type_id IN
+                <foreach collection="q.keywordTypeIds" item="tid" open="(" separator="," close=")">
+                    #{tid}
+                </foreach>
+            </if>
+            )
+        </if>
+
+        <!-- AC-3.1 类型筛选（多选 AND 叠加） -->
+        <if test="q.typeIds != null and q.typeIds.size() > 0">
+        <!-- 根据游戏类型ID筛选 -->
+            AND g.game_type_id IN
+            <foreach collection="q.typeIds" item="tid" open="(" separator="," close=")">
+                #{tid}
+            </foreach>
+        </if>
+
+        <!-- AC-3.1 平台筛选：该游戏在该平台有当前价 -->
+        <if test="q.platformIds != null and q.platformIds.size() > 0">
+        <!-- 检查游戏在指定平台上是否有当前有效的价格记录 -->
+            AND EXISTS (
+            SELECT 1
+            FROM price_record p1  <!-- 价格记录表 -->
+            JOIN platform pf1    <!-- 平台表 -->
+            ON pf1.id = p1.platform_id
+            AND pf1.enabled = 1  <!-- 平台已启用 -->
+            AND pf1.api_ready = 1  <!-- 平台API已准备就绪 -->
+            AND pf1.deleted = 0  <!-- 平台未删除 -->
+            WHERE p1.game_id = g.id  <!-- 关联游戏ID -->
+            AND p1.is_current = 1  <!-- 当前价格记录 -->
+            AND p1.status = 1  <!-- 价格记录状态正常 -->
+            AND p1.platform_id IN  <!-- 在指定平台ID列表中 -->
+            <foreach collection="q.platformIds" item="pid" open="(" separator="," close=")">
+                #{pid}
+            </foreach>
+            )
+        </if>
+
+        <!-- AC-3.5 价格区间：按「起价」过滤，边界包含 -->
+        <if test="q.priceMin != null or q.priceMax != null">
+            <choose>
+            <!-- 同时设置了最小和最大价格 -->
+                <when test="q.priceMin != null and q.priceMax != null">
+                    AND <include refid="minPriceExpr"/> BETWEEN #{q.priceMin} AND #{q.priceMax}
+                </when>
+            <!-- 只设置了最小价格 -->
+                <when test="q.priceMin != null">
+                    AND <include refid="minPriceExpr"/> &gt;= #{q.priceMin}
+                </when>
+            <!-- 只设置了最大价格 -->
+                <otherwise>
+                    AND <include refid="minPriceExpr"/> &lt;= #{q.priceMax}
+                </otherwise>
+            </choose>
+        </if>
+
+        <!-- AC-6.1 前置：只保留「折扣未结束」的游戏 -->
+        <if test="q.discountOnly != null and q.discountOnly">
+        <!-- 检查游戏是否有未结束的折扣 -->
+            AND EXISTS (
+            SELECT 1
+            FROM price_record p3  <!-- 价格记录表 -->
+            JOIN platform pf3    <!-- 平台表 -->
+            ON pf3.id = p3.platform_id
+            AND pf3.enabled = 1  <!-- 平台已启用 -->
+            AND pf3.api_ready = 1  <!-- 平台API已准备就绪 -->
+            AND pf3.deleted = 0  <!-- 平台未删除 -->
+            WHERE p3.game_id = g.id  <!-- 关联游戏ID -->
+            AND p3.is_current = 1  <!-- 当前价格记录 -->
+            AND p3.status = 1  <!-- 价格记录状态正常 -->
+            AND p3.discount_rate IS NOT NULL  <!-- 有折扣 -->
+            AND p3.discount_rate &gt; 0  <!-- 折扣率大于0 -->
+            AND (p3.discount_end_time IS NULL OR p3.discount_end_time &gt; NOW())  <!-- 折扣未结束或无结束时间 -->
+            )
+        </if>
+
+    <!-- 排序规则：按权重升序、创建时间降序、ID降序 -->
+        ORDER BY g.sort_weight ASC, g.create_time DESC, g.id DESC
+    </select>
+
+</mapper>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.gameprice.favorite.mapper.FavoriteMapper">
+
+    <!-- AC-11.3：收藏列表只统计上架游戏，total 与 list 同源，避免"共 N 款"与卡片数不一致 -->
+    <!--
+        查询用户收藏列表的SQL映射语句
+        通过用户ID查询该用户收藏的所有游戏
+        只查询状态为1(上架)的游戏
+        结果按收藏创建时间倒序、ID倒序排列
+    -->
+    <!--
+      注意：本 SQL 内不要写行尾的 SQL 注释（连字符注释）。
+      MyBatis-Plus 分页拦截器会把 LIMIT 子句追加到语句末尾，
+      若最后一行带该类注释，追加的 LIMIT 会被当成注释吞掉，
+      导致 Parameter index out of range (2 > 1)。
+      需要说明请用 XML 注释，或把注释单独写在一行上方。
+    -->
+    <select id="selectMyPage" resultType="com.gameprice.favorite.entity.Favorite">
+        SELECT f.*
+        FROM favorite f
+        JOIN game g ON g.id = f.game_id AND g.status = 1
+        WHERE f.user_id = #{userId}
+        ORDER BY f.create_time DESC, f.id DESC
+    </select>
+
+</mapper>

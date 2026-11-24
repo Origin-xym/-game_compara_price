@@ -44,7 +44,7 @@ if (Test-Port $BackendPort) {
         if (-not (Test-Path $jar)) { throw "打包失败，未生成 $jar" }
     }
     Write-Host '[2/3] 启动后端 ...'
-    Start-Process -FilePath 'java' -ArgumentList '-jar', $jar `
+        Start-Process -FilePath 'java' -ArgumentList '-Djavax.net.ssl.trustStoreType=Windows-ROOT', '-jar', $jar `
         -WorkingDirectory $backendDir -WindowStyle Minimized `
         -RedirectStandardOutput (Join-Path $backendDir 'app.log') `
         -RedirectStandardError  (Join-Path $backendDir 'app.err.log')

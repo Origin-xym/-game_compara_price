@@ -59,7 +59,13 @@ app:
   collect:
       volatility-threshold: 0.5      # 采集价与当前价偏离 > 50% 视为剧烈波动，进待确认（AC-12.6）
       cron: "0 0 4 * * ?"            # 每天 04:00 全量采集
-      mock-enabled: true             # 一期用模拟源验证链路，接真实 API 时置 false
+      mock-enabled: false             # 一期用模拟源验证链路，接真实 API 时置 false
+      steam-enabled: true
+      steam-timeout-ms: 6000
+      epic-enabled: true
+      epic-timeout-ms: 8000
+      epic-locale: en-US
+
 
 logging:
   level:

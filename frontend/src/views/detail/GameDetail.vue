@@ -102,6 +102,41 @@ function discountText(row) {
   return `-${Number(row.discountRate).toFixed(0)}%`
 }
 
+// 史低取值：本站史低（price_record 真实最低，随采集/录入自动更新）优先，官方史低兜底
+function lowValue(row) {
+  return row.lowestEverCny != null ? row.lowestEverCny : row.historyLowCny
+}
+
+// 史低发生时间：本站史低时间优先
+function lowDate(row) {
+  return row.lowestEverAt || row.historyLowDate
+}
+
+// 是否已到历史最低（用于“已到史低”标记，不参与最低价计算）
+function atLow(row) {
+  const low = lowValue(row)
+  return row.cnyAmount != null && low != null && Number(low) >= Number(row.cnyAmount)
+}
+
+// 底部史低汇总：只列有史低的平台（占位卡/无数据的平台不出现）
+const lowSummary = computed(() =>
+  (detail.value?.platforms || [])
+    .map((p) => ({
+      platformId: p.platformId,
+      platformName: p.platformName,
+      low: lowValue(p),
+      at: lowDate(p)
+    }))
+    .filter((x) => x.low != null)
+)
+
+// 划线原价折成人民币：有 originalPrice 用划线价，否则退回实付价；rate 为入库固化汇率
+function originCny(row) {
+  const amt = row.originalPrice != null ? Number(row.originalPrice) : Number(row.originalAmount)
+  return (amt * (Number(row.rate) || 0)).toFixed(2)
+}
+
+
 const cheapest = computed(() => detail.value?.platforms?.find((p) => p.lowest))
 // 挂载后拉取详情：少了这一行，detail 永远为 null，详情页只会显示"游戏不存在或已下架"
 onMounted(fetchDetail)
@@ -178,85 +213,70 @@ watch(() => route.params.id, (id) => {
       <h2 class="section-title">多平台价格对比</h2>
 
     <!-- 无报价提示 -->
-      <el-empty v-if="!detail.hasQuote" description="该游戏在各平台上暂无报价" />
+      <el-empty v-if="!detail.platforms || detail.platforms.length === 0" description="该游戏在各平台上暂无报价" />
 
     <!-- 平台价格对比表格 -->
-      <el-table v-else :data="detail.platforms" border stripe>
-      <!-- 平台信息列 -->
-        <el-table-column label="平台" min-width="140">
-          <template #default="{ row }">
-            <span class="platform-name">{{ row.platformName }}</span>
-            <el-tag v-if="row.lowest" size="small" type="danger" class="lowest-tag">最低价</el-tag>
-            <div class="region">{{ row.platformRegion }} · {{ row.currency }}</div>
-          </template>
-        </el-table-column>
+      <div v-else class="plist">
+        <div v-for="row in detail.platforms" :key="row.platformId"
+             class="pcard" :class="{ 'is-lowest': row.lowest }">
 
-      <!-- 人民币实付价格列 -->
-        <el-table-column label="人民币实付" width="150">
-          <template #default="{ row }">
-            <span :class="['cny', { lowest: row.lowest }]">¥{{ Number(row.cnyAmount).toFixed(2) }}</span>
-            <div class="origin">
-                          <el-tag
-              v-if="row.historyLowCny != null && Number(row.historyLowCny) >= Number(row.cnyAmount)"
-              size="small"
-              type="success"
-              class="at-low">
-              已到史低
-            </el-tag>
-
-              原价 {{ row.currency }} {{ Number(row.originalAmount).toFixed(2) }}
+          <!-- 平台 -->
+          <div>
+            <div class="pname">
+              {{ row.platformName }}
+              <el-tag v-if="row.lowest" size="small" type="danger" effect="dark">最低价</el-tag>
             </div>
-          </template>
-        </el-table-column>
-
-      <!-- 折扣信息列 -->
-        <el-table-column label="折扣" width="130">
-          <template #default="{ row }">
-            <el-tag v-if="row.discountActive" type="danger">{{ discountText(row) }}</el-tag>
-            <div v-if="row.discountEndTime" class="end">截至 {{ row.discountEndTime }}</div>
-            <span v-else-if="!row.discountActive" class="muted">无折扣</span>
-          </template>
-        </el-table-column>
-
-      <!-- 价格时间列 -->
-        <el-table-column label="价格时间" width="180">
-          <template #default="{ row }">
-            <span>{{ row.recordedAt }}</span>
-            <el-tag v-if="row.stale" size="small" type="info" class="stale">可能已过期</el-tag>
-          </template>
-        </el-table-column>
-
-      <!-- 风险提示列 -->
-        <el-table-column label="风险" min-width="200">
-          <template #default="{ row }">
-            <el-alert
-              v-if="row.riskLevel >= 1"
-              :type="riskType[row.riskLevel]"
-              :title="riskText[row.riskLevel]"
-              :description="row.riskReason"
-              :closable="false"
-              show-icon />
-            <span v-else class="muted">无锁区风险</span>
-            <div v-if="row.riskLevel >= 1 && row.riskSource" class="risk-source">
-              依据：{{ row.riskSource }}
+            <div class="ptags">
+              <el-tag v-if="row.stale" size="small" type="info">可能已过期</el-tag>
+              <el-tag v-if="atLow(row)" size="small" type="success">已到史低</el-tag>
+              <el-tag v-if="lowValue(row) != null" size="small" type="success" effect="plain">
+                史低 ¥{{ Number(lowValue(row)).toFixed(2) }}
+              </el-tag>
             </div>
-          </template>
-        </el-table-column>
+          </div>
 
-      <!-- 操作按钮列 -->
-        <el-table-column label="操作" width="130" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              v-if="row.purchasable"
-              type="primary"
-              size="small"
-              @click="openShop(row)">
-              前往商店
-            </el-button>
-            <div v-else class="no-link">{{ unavailableReason(row) }}</div>
-          </template>
-        </el-table-column>
-      </el-table>
+          <!-- 价格 -->
+          <div>
+            <template v-if="row.hasPrice !== false">
+              <div class="price-line">
+                <span class="now">¥{{ Number(row.cnyAmount).toFixed(2) }}</span>
+                <span v-if="row.discountActive" class="off">{{ discountText(row) }}</span>
+              </div>
+              <div v-if="row.discountActive" class="price-sub">
+                <span class="strike">原价 ¥{{ originCny(row) }}</span>
+              </div>
+              <div class="price-sub">
+                <span v-if="row.discountEndTime">折扣截至 {{ row.discountEndTime }}</span>
+                <span v-else-if="!row.discountActive">无折扣</span>
+                <span class="time">{{ row.recordedAt }}</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="price-line">
+                <span class="now pending">暂无报价</span>
+              </div>
+              <div class="price-sub">
+                <span>该平台价格待接入，录入后自动更新</span>
+              </div>
+            </template>
+          </div>
+          <!-- 风险 -->
+          <div>
+            <div v-if="row.riskLevel >= 1" class="risk" :class="'r' + row.riskLevel">
+              <span class="dot"></span>
+              <span>{{ riskText[row.riskLevel] }}<span v-if="row.riskReason"> · {{ row.riskReason }}</span></span>
+            </div>
+            <div v-else class="risk none"><span class="dot"></span><span>无锁区风险</span></div>
+            <div v-if="row.riskLevel >= 1 && row.riskSource" class="src">依据：{{ row.riskSource }}</div>
+          </div>
+
+          <!-- 操作 -->
+          <div class="pact">
+            <el-button v-if="row.purchasable" type="primary" size="small" @click="openShop(row)">前往商店</el-button>
+            <span v-else class="no-link">{{ row.hasPrice === false ? '暂无链接' : unavailableReason(row) }}</span>
+          </div>
+        </div>
+      </div>
             <template v-if="detail.hasQuote">
         <h2 class="section-title">价格走势</h2>
         <PriceChart
@@ -268,10 +288,10 @@ watch(() => route.params.id, (id) => {
 
         <div class="low-summary">
           <el-tag
-            v-for="p in detail.platforms.filter(x => x.historyLowCny != null)"
+            v-for="p in lowSummary"
             :key="p.platformId"
             type="info">
-            史低 · {{ p.platformName }} ¥{{ Number(p.historyLowCny).toFixed(2) }}
+            史低 · {{ p.platformName }} ¥{{ Number(p.low).toFixed(2) }}
           </el-tag>
           <span class="low-note">史低仅作标注，不参与最低价计算</span>
         </div>
@@ -313,4 +333,35 @@ watch(() => route.params.id, (id) => {
 .low-summary { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 .low-note { font-size: 12px; color: #a8abb2; }
 .at-low { margin-left: 6px; }
+/* ---- 平台价格卡片（浅色简洁版） ---- */
+.plist { display: flex; flex-direction: column; gap: 12px; }
+.pcard {
+  display: grid; grid-template-columns: 150px 220px minmax(0, 1fr) 110px;
+  align-items: center; gap: 24px;
+  padding: 16px 20px; background: #fff;
+  border: 1px solid #ebeef5; border-radius: 8px;
+}
+
+.pcard.is-lowest { border-color: #f56c6c; background: #fffafa; }
+.pname { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; color: #303133; }
+.pregion { margin-top: 2px; font-size: 12px; color: #a8abb2; }
+.ptags { display: flex; gap: 6px; margin-top: 6px; }
+
+.price-line { display: flex; align-items: baseline; gap: 8px; }
+.now { font-size: 26px; font-weight: 700; color: #f56c6c; line-height: 1.1; }
+.now.pending { font-size: 20px; font-weight: 600; color: #909399; }
+.off { padding: 1px 6px; font-size: 12px; font-weight: 600; color: #f56c6c;
+       background: #fef0f0; border: 1px solid #fde2e2; border-radius: 4px; }
+.price-sub { display: flex; gap: 10px; margin-top: 4px; font-size: 12px; color: #909399; }
+.strike { color: #c0c4cc; text-decoration: line-through; }
+.time { color: #c0c4cc; }
+
+.risk { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.6; }
+.risk .dot { flex: none; width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; background: currentColor; }
+.risk.r1, .risk.r2 { color: #e6a23c; }
+.risk.r3 { color: #f56c6c; }
+.risk.none { color: #a8abb2; }
+.src { margin-top: 2px; font-size: 11px; color: #a8abb2; }
+.pact { display: flex; justify-content: flex-end; }
+.no-link { font-size: 12px; color: #f56c6c; text-align: right; }
 </style>

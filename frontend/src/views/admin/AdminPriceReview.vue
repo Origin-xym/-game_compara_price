@@ -1,10 +1,11 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  runCollect, listCollectLogs, listPendingPrices, approvePrice, rejectPrice
+    runCollect, listCollectLogs, listPendingPrices, approvePrice, rejectPrice, createManualPrice
 } from '@/api/collect'
-import { adminListPlatforms } from '@/api/admin'
+import { adminListPlatforms, adminListGames } from '@/api/admin'
+
 
 const tab = ref('pending')
 
@@ -113,6 +114,76 @@ function statusTagType(status) {
   return { 0: 'info', 1: 'success', 2: 'warning', 3: 'danger' }[status] || 'info'
 }
 
+// ---------------- 手动录入价格（M12 手工维护一路） ----------------
+const entryVisible = ref(false)
+const entrySaving = ref(false)
+const entryFormRef = ref(null)
+const gameOptions = ref([])
+const gameSearching = ref(false)
+
+// 只有「有官方接口 + 数据源就绪 + 启用中」的平台能上架价格（后端 createManualPrice 会再拦一次）
+const entryPlatforms = computed(() =>
+  platforms.value.filter((p) => p.dataSourceType !== 3 && p.apiReady === 1 && p.enabled === 1)
+)
+
+const entryForm = reactive({
+  gameId: null, platformId: null, currency: '',
+  originalAmount: null, originalPrice: null,
+  discountRate: null, discountEndTime: null, remark: ''
+})
+const entryRules = {
+  gameId: [{ required: true, message: '请选择游戏', trigger: 'change' }],
+  platformId: [{ required: true, message: '请选择平台', trigger: 'change' }],
+  currency: [{ required: true, message: '请选择平台后自动带出币种', trigger: 'change' }],
+  originalAmount: [{ required: true, message: '请填写现价', trigger: 'blur' }]
+}
+
+async function searchGames(kw) {
+  gameSearching.value = true
+  try {
+    const data = await adminListGames({ page: 1, size: 20, keyword: kw || undefined })
+    gameOptions.value = data.list || []
+  } finally {
+    gameSearching.value = false
+  }
+}
+
+function openEntry() {
+  entryVisible.value = true
+  if (gameOptions.value.length === 0) searchGames('')
+}
+
+// 币种必须等于平台结算币种，选中即带出并锁定，避免手填不一致被后端拒
+function onPlatformChange(pid) {
+  const p = entryPlatforms.value.find((x) => x.id === pid)
+  entryForm.currency = p ? p.currency : ''
+}
+
+function resetEntry() {
+  entryFormRef.value?.resetFields()
+  entryForm.currency = ''
+}
+
+async function submitEntry() {
+  await entryFormRef.value.validate()
+  try {
+    await ElMessageBox.confirm(
+      `该价格将直接生效（不进入待确认队列）：${entryForm.currency} ${entryForm.originalAmount}`,
+      '确认录入', { type: 'warning' }
+    )
+  } catch (e) { return }
+  entrySaving.value = true
+  try {
+    await createManualPrice({ ...entryForm })
+    ElMessage.success('录入成功，该平台当前价已更新')
+    entryVisible.value = false
+    fetchPending()
+  } finally {
+    entrySaving.value = false
+  }
+}
+
+
 onMounted(async () => {
   try {
     platforms.value = await adminListPlatforms()
@@ -126,6 +197,9 @@ onMounted(async () => {
 
 <template>
   <div class="review-page">
+        <div class="pagebar">
+      <el-button type="primary" @click="openEntry">手动录入价格</el-button>
+    </div>
     <el-tabs v-model="tab">
       <!-- 待确认队列（AC-12.6） -->
       <el-tab-pane :label="`待确认队列 ${pendingTotal}`" name="pending">
@@ -204,11 +278,59 @@ onMounted(async () => {
         </div>
       </el-tab-pane>
     </el-tabs>
+        <el-dialog v-model="entryVisible" title="手动录入价格" width="560px" @closed="resetEntry">
+      <el-form ref="entryFormRef" :model="entryForm" :rules="entryRules" label-width="110px">
+        <el-form-item label="游戏" prop="gameId">
+          <el-select v-model="entryForm.gameId" filterable remote clearable
+                     :remote-method="searchGames" :loading="gameSearching"
+                     placeholder="输入游戏名搜索（留空显示前 20 条）" style="width: 100%">
+            <el-option v-for="g in gameOptions" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="平台" prop="platformId">
+          <el-select v-model="entryForm.platformId" clearable style="width: 100%"
+                     @change="onPlatformChange">
+            <el-option v-for="p in entryPlatforms" :key="p.id"
+                       :label="`${p.name} / ${p.region}（${p.currency}）`" :value="p.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="币种" prop="currency">
+          <el-input v-model="entryForm.currency" disabled placeholder="选择平台后自动带出并锁定" />
+        </el-form-item>
+                <el-form-item label="现价（实付价）" prop="originalAmount">
+          <el-input-number v-model="entryForm.originalAmount" :min="0.01" :precision="2"
+                           :controls="false" placeholder="用户实际支付的价格（原币）" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="原价（划线价）">
+          <el-input-number v-model="entryForm.originalPrice" :min="0.01" :precision="2"
+                           :controls="false" placeholder="只做折扣展示用；无折扣留空" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="折扣率 %">
+          <el-input-number v-model="entryForm.discountRate" :min="0" :max="99.99" :precision="2" style="width: 200px" />
+        </el-form-item>
+        <el-form-item label="折扣截止">
+          <el-date-picker v-model="entryForm.discountEndTime" type="datetime"
+                          value-format="YYYY-MM-DDTHH:mm:ss"
+                          :disabled-date="(d) => d.getTime() < Date.now()"
+                          placeholder="填折扣率时建议填写" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="entryForm.remark" maxlength="200" show-word-limit
+                    placeholder="写入 source_ref，如：人工核对 Xbox 官网价" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="entryVisible = false">取消</el-button>
+        <el-button type="primary" :loading="entrySaving" @click="submitEntry">确定录入</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
 <style scoped>
 .review-page { padding: 20px 0; }
+.pagebar { margin-bottom: 12px; }
 .runbar { display: flex; gap: 10px; margin-bottom: 14px; }
 .new-price { color: #f56c6c; font-weight: 700; }
 .sub { font-size: 12px; color: #909399; }

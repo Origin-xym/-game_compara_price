@@ -2,7 +2,8 @@
 import { ref, reactive, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  adminListPlatforms, createPlatform, updatePlatform, changePlatformStatus
+    adminListPlatforms, createPlatform, updatePlatform, changePlatformStatus, deletePlatform
+
 } from '@/api/admin'
 
 const loading = ref(false)
@@ -105,6 +106,23 @@ async function toggleEnabled(row) {
   fetchList()
 }
 
+async function removeRow(row) {
+  try {
+    await ElMessageBox.confirm(
+      `删除后「${row.name} / ${row.region}」立即从前台消失（不再参与最低价、走势、采集），` +
+      `历史价格与游戏链接仍保留在库里；以后用相同编码+区域新建会自动恢复。确认删除？`,
+      '删除平台',
+      { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' }
+    )
+  } catch (e) {
+    return
+  }
+  await deletePlatform(row.id)
+  ElMessage.success('已删除')
+  fetchList()
+}
+
+
 function sourceTagType(t) {
   return { 1: 'success', 2: 'warning', 3: 'info' }[t] || 'info'
 }
@@ -160,9 +178,10 @@ onMounted(fetchList)
       </el-table-column>
 
       <el-table-column prop="linkTemplate" label="链接模板" min-width="200" show-overflow-tooltip />
-      <el-table-column label="操作" width="90" fixed="right">
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="danger" @click="removeRow(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>

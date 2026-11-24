@@ -18,4 +18,7 @@ public interface PlatformAdminService {
 
     /** 启用 / 禁用（AC-13.2） */
     void changeStatus(Long id, Integer enabled);
+
+    void remove(Long id);
+
 }

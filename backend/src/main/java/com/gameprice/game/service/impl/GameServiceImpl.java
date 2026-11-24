@@ -21,6 +21,7 @@ import com.gameprice.platform.entity.Platform;
 import com.gameprice.platform.entity.RegionRisk;
 import com.gameprice.price.dto.CurrentPriceRow;
 import com.gameprice.price.entity.HistoricalLow;
+import com.gameprice.price.entity.PriceRecord;
 import com.gameprice.price.mapper.PriceRecordMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -81,13 +82,17 @@ public class GameServiceImpl implements GameService {
     @Override
     /**
      * 获取游戏列表
-     * @param query 游戏列表查询条件，包含价格区间、关键词、分页等信息
-     * @return 分页结果，包含游戏列表信息
+     * @param query 游戏列表查询条件，包含分页、价格区间、关键词等信息
+     * @return 分页结果，包含游戏列表项信息
      */
     public PageResult<GameListItemVO> listGames(GameListQuery query) {
         // 1. 区间合法性：起点不能大于终点（AC-3.5 可复现的前提）
+        // 检查价格区间的有效性
+        // 如果查询条件中同时设置了最小价格和最大价格
         if (query.getPriceMin() != null && query.getPriceMax() != null
+                // 并且比较最小价格和最大价格，如果最小价格大于最大价格
                 && query.getPriceMin().compareTo(query.getPriceMax()) > 0) {
+            // 则抛出业务异常，提示价格区间起点不能大于终点
             throw new BizException(ErrorCode.PARAM_INVALID, "价格区间起点不能大于终点");
         }
 
@@ -95,27 +100,52 @@ public class GameServiceImpl implements GameService {
         prepareKeyword(query);
 
         // 3. 分页查询（SQL 侧完成搜索、筛选、计数）
+        // 创建一个分页对象，设置当前页码和每页显示数量
+        // query.getPage() 获取当前页码，query.getSize() 获取每页显示数量
         IPage<Game> page = new Page<>(query.getPage(), query.getSize());
+        // 使用分页查询游戏信息
+        // 调用gameMapper的selectAppPage方法，传入分页对象和查询条件
+        // 返回结果是一个游戏列表，包含当前页的数据
         List<Game> games = gameMapper.selectAppPage(page, query);
 
+        // 检查游戏列表是否为空
         if (games.isEmpty()) {
+            // 如果游戏列表为空，则返回一个空的分页结果对象
+            // 参数包括当前页码和每页大小，这些信息从查询对象中获取
             return PageResult.empty(query.getPage(), query.getSize());
         }
 
+        // 使用Stream将Game对象列表转换为ID列表
+        // 通过map方法提取每个Game对象的getId方法
+        // 使用collect方法将结果收集为List集合
         List<Long> gameIds = games.stream().map(Game::getId).collect(Collectors.toList());
 
         // 4. 批量补类型名与当前价（避免 N+1）
+        // 加载游戏类型名称映射表，键为游戏ID，值为类型名称
         Map<Long, String> typeNameMap = loadTypeNames(games);
+        // 加载当前价格数据映射表，键为游戏ID，值为当前价格行列表
         Map<Long, List<CurrentPriceRow>> priceMap = loadCurrentPrices(gameIds);
 
         // 5. 组装
+        // 获取当前日期和时间
         LocalDateTime now = LocalDateTime.now();
+        // 创建一个与games列表大小相同的ArrayList，用于存储GameListItemVO对象
         List<GameListItemVO> items = new ArrayList<>(games.size());
+        // 遍历games列表中的每个游戏对象
         for (Game g : games) {
+            // 将游戏对象转换为GameListItemVO对象，并添加到items列表中
+            // 转换时传入游戏对象、类型名称映射、价格映射（如果找不到对应价格则使用空列表）和当前时间
             items.add(toItem(g, typeNameMap,
                     priceMap.getOrDefault(g.getId(), Collections.emptyList()), now));
         }
 
+        // 返回分页结果对象
+        // PageResult.of() 是创建分页结果对象的方法
+        // 参数说明：
+        // page.getTotal() - 获取总记录数
+        // query.getPage() - 获取当前页码
+        // query.getSize() - 获取每页大小
+        // items - 当前页的数据列表
         return PageResult.of(page.getTotal(), query.getPage(), query.getSize(), items);
     }
 
@@ -156,6 +186,8 @@ public class GameServiceImpl implements GameService {
      */
     private List<Long> findTypeIdsByName(String keyword) {
         // 使用LambdaQueryWrapper进行模糊查询，查找名称中包含关键词的游戏类型
+        // 从数据库中查询游戏类型列表
+        // 使用LambdaQueryWrapper构建查询条件，支持动态SQL拼接
         List<GameType> types = gameTypeMapper.selectList(
                 new LambdaQueryWrapper<GameType>()
                         .and(w -> w.like(GameType::getName, keyword)
@@ -215,9 +247,9 @@ public class GameServiceImpl implements GameService {
  * @return 转换后的游戏列表项视图对象
  */
     private GameListItemVO toItem(Game g, Map<Long, String> typeNameMap, List<CurrentPriceRow> prices,LocalDateTime now) {
-    // 创建游戏列表项视图对象
+        // 创建游戏列表项视图对象
         GameListItemVO vo = new GameListItemVO();
-    // 设置游戏基本信息
+        // 设置游戏基本信息
         vo.setId(g.getId());                    // 设置游戏ID
         vo.setName(g.getName());                // 设置游戏中文名称
         vo.setNameEn(g.getNameEn());            // 设置游戏英文名称
@@ -225,7 +257,7 @@ public class GameServiceImpl implements GameService {
         vo.setGameTypeId(g.getGameTypeId());    // 设置游戏类型ID
         vo.setGameTypeName(typeNameMap.get(g.getGameTypeId()));  // 设置游戏类型名称
 
-    // 检查是否有报价数据
+        // 检查是否有报价数据
         if (prices.isEmpty()) {
             // AC-1.3：无报价不返回 0
             vo.setHasQuote(false);              // 设置无报价标志
@@ -239,20 +271,20 @@ public class GameServiceImpl implements GameService {
             return vo;                          // 直接返回无报价的VO对象
         }
 
-    // 计算最低价格
+        // 计算最低价格
         BigDecimal min = prices.stream()
                 .map(CurrentPriceRow::getCnyAmount)  // 提取人民币金额
                 .filter(Objects::nonNull)            // 过滤掉null值
                 .min(Comparator.naturalOrder())      // 找出最小值
                 .orElse(null);                       // 如果没有值则为null
 
-    // 构建平台标签映射
-// 创建一个LinkedHashMap，用于存储平台ID与平台标签的映射关系
-// 使用LinkedHashMap可以保持插入顺序，这对于需要按顺序显示平台信息的场景很有用
+        // 构建平台标签映射
+        // 创建一个LinkedHashMap，用于存储平台ID与平台标签的映射关系
+        // 使用LinkedHashMap可以保持插入顺序，这对于需要按顺序显示平台信息的场景很有用
         Map<Long, GameListItemVO.PlatformTag> tagMap = new LinkedHashMap<>();
-// 遍历价格列表中的每一行数据
+        // 遍历价格列表中的每一行数据
         for (CurrentPriceRow row : prices) {
-        // 如果平台ID不存在，则创建新的平台标签
+            // 如果平台ID不存在，则创建新的平台标签
             // 使用putIfAbsent方法向tagMap中添加键值对
             // 如果key不存在，则添加；如果key已存在，则不进行操作
             tagMap.putIfAbsent(row.getPlatformId(),  // 键：使用平台ID作为key
@@ -260,7 +292,7 @@ public class GameServiceImpl implements GameService {
                             row.getPlatformCode(), row.getPlatformName()));
         }
 
-    // 设置价格和平台相关信息
+        // 设置价格和平台相关信息
         // 设置是否有报价的标志为true
         vo.setHasQuote(true);
         // 设置最小价格（人民币）
@@ -299,31 +331,25 @@ public class GameServiceImpl implements GameService {
         GameDetailVO vo = new GameDetailVO();
 
 
-// 设置游戏基本信息
+        // 设置游戏基本信息
         vo.setId(game.getId());              // 设置游戏ID
         vo.setName(game.getName());          // 设置游戏中文名称
         vo.setNameEn(game.getNameEn());      // 设置游戏英文名称
         vo.setCoverUrl(game.getCoverUrl());  // 设置游戏封面图片URL
         vo.setSummary(game.getSummary());     // 设置游戏简介
         vo.setGameTypeId(game.getGameTypeId()); // 设置游戏类型ID
-// 设置游戏类型信息，如果type为null则设置为null，否则设置为type的名称
+        // 设置游戏类型信息，如果type为null则设置为null，否则设置为type的名称
         vo.setGameTypeName(type == null ? null : type.getName());
-// 设置游戏发行年份
+        // 设置游戏发行年份
         vo.setReleaseYear(game.getReleaseYear());
 
         if (rows.isEmpty()) {
-            // AC-1.3：无任何平台报价
-            // 设置报价状态为false
             vo.setHasQuote(false);
-            // 设置最小人民币价格为null
             vo.setMinPriceCny(null);
-            // 设置平台数量为0
             vo.setPlatformCount(0);
-            // 设置平台列表为空集合
-            vo.setPlatforms(Collections.emptyList());
-            // 设置最后更新时间为null
+            // 没价也要把"能买的平台"列出来，价格留空等录入/采集
+            vo.setPlatforms(buildPlaceholderRows(gameId, null, null, null, LocalDateTime.now()));
             vo.setLastUpdateTime(null);
-            // 返回结果对象
             return vo;
         }
 
@@ -353,10 +379,23 @@ public class GameServiceImpl implements GameService {
         // 查询各平台的锁区风险信息，并按平台ID分组（M6）
         // 锁区风险，按平台分组（M6）
         Map<Long, List<RegionRisk>> riskMap = regionRiskService.groupByPlatform(platformIds);
-        // M5 史低标注：按平台取，仅用于展示
+        // M5 史低标注：按平台取，仅用于展示（只取本次参与展示的平台，避免已停用/已删平台的旧史低混进来）
         Map<Long, HistoricalLow> lowMap = historicalLowMapper.selectList(
-                        new LambdaQueryWrapper<HistoricalLow>().eq(HistoricalLow::getGameId, gameId))
+                        new LambdaQueryWrapper<HistoricalLow>()
+                                .eq(HistoricalLow::getGameId, gameId)
+                                .in(HistoricalLow::getPlatformId, platformIds))
                 .stream().collect(Collectors.toMap(HistoricalLow::getPlatformId, x -> x, (a, b) -> a));
+
+        // 本站史低：取 price_record 里该游戏各平台的历史最低（真实数据，采集/手动录入都会自动刷新）
+        Map<Long, PriceRecord> everLowMap = priceRecordMapper.selectList(
+                        new LambdaQueryWrapper<PriceRecord>()
+                                .eq(PriceRecord::getGameId, gameId)
+                                .eq(PriceRecord::getStatus, 1)
+                                .in(PriceRecord::getPlatformId, platformIds))
+                .stream()
+                .filter(x -> x.getCnyAmount() != null)
+                .collect(Collectors.toMap(PriceRecord::getPlatformId, x -> x,
+                        (a, b) -> a.getCnyAmount().compareTo(b.getCnyAmount()) <= 0 ? a : b));
 
 
         // 获取当前时间
@@ -369,14 +408,22 @@ public class GameServiceImpl implements GameService {
             CurrentPriceRow row = rows.get(i);
             // 根据平台ID获取平台信息
             Platform platform = platformMap.get(row.getPlatformId());
-            // 创建平台价格VO对象并添加到结果列表
-            platformVOs.add(toPlatformRow(row, platform,
+            // 创建平台价格VO对象
+            PlatformPriceVO pv = toPlatformRow(row, platform,
                     linkMap.get(row.getPlatformId()),
-                    pickRisk(riskMap, row.getPlatformId(), platform),lowMap.get(row.getPlatformId()),
-                    i == 0, now));
+                    pickRisk(riskMap, row.getPlatformId(), platform), lowMap.get(row.getPlatformId()),
+                    i == 0, now);
+            // 本站史低（自有历史数据）
+            PriceRecord ever = everLowMap.get(row.getPlatformId());
+            if (ever != null) {
+                pv.setLowestEverCny(ever.getCnyAmount());
+                pv.setLowestEverAt(ever.getRecordedAt());
+            }
+            platformVOs.add(pv);
         }
 
-
+        // 追加"还没有当前价"的平台占位卡（小黑盒/杉果/steampy 等），录入或采集到价后自动变成真实价签
+        platformVOs.addAll(buildPlaceholderRows(gameId, platformIds, linkMap, lowMap, now));
         // 获取所有行数据中的最新记录时间
         // 使用Stream流处理：提取记录时间 -> 过滤掉null值 -> 找出最大值 -> 如果没有值则返回null
         LocalDateTime lastUpdate = rows.stream()
@@ -384,13 +431,11 @@ public class GameServiceImpl implements GameService {
                 .filter(Objects::nonNull)
                 .max(Comparator.naturalOrder())
                 .orElse(null);
-
-
-
+        
         // 设置视图对象的各项属性
         vo.setHasQuote(true);                    // 设置是否有报价标志为true
         vo.setMinPriceCny(rows.get(0).getCnyAmount());  // 设置最小人民币价格（取第一行的价格）
-        vo.setPlatformCount(platformVOs.size()); // 设置平台数量
+        vo.setPlatformCount((int) rows.size());  // 平台数量只算有价的
         vo.setPlatforms(platformVOs);            // 设置平台列表
 
         vo.setLastUpdateTime(lastUpdate);        // 设置最后更新时间
@@ -449,6 +494,7 @@ public class GameServiceImpl implements GameService {
         vo.setOriginalAmount(row.getOriginalAmount());
         vo.setOriginalPrice(row.getOriginalPrice());
         vo.setCnyAmount(row.getCnyAmount());
+        vo.setHasPrice(true);
         vo.setRate(row.getRate());
         vo.setRateTime(row.getRateTime());
         vo.setRecordedAt(row.getRecordedAt());
@@ -504,6 +550,95 @@ public class GameServiceImpl implements GameService {
         vo.setPurchasable(shopUrl != null && level < 3);
         return vo;
     }
+
+    /**
+     * 生成"暂无报价"的占位卡片：本游戏已关联(listed=1)且平台启用(enabled=1)但没有当前价
+     * 注意：这里不过滤 api_ready，因为"能不能显示"和"能不能进最低价口径"是两件事
+     */
+    private List<PlatformPriceVO> buildPlaceholderRows(Long gameId, Set<Long> excludePlatformIds,
+                                                       Map<Long, GamePlatform> linkMap,
+                                                       Map<Long, HistoricalLow> lowMap,
+                                                       LocalDateTime now) {
+        List<GamePlatform> allLinks = gamePlatformMapper.selectList(
+                new LambdaQueryWrapper<GamePlatform>().eq(GamePlatform::getGameId, gameId));
+        if (allLinks.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Set<Long> listedIds = allLinks.stream()
+                .filter(x -> Integer.valueOf(1).equals(x.getListed()))
+                .map(GamePlatform::getPlatformId)
+                .collect(Collectors.toSet());
+        if (excludePlatformIds != null) {
+            listedIds.removeAll(excludePlatformIds);
+        }
+        if (listedIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        // 平台必须启用；deleted 由 @TableLogic 自动过滤
+        List<Platform> platforms = platformMapper.selectList(new LambdaQueryWrapper<Platform>()
+                .in(Platform::getId, listedIds)
+                .eq(Platform::getEnabled, 1)
+                .orderByAsc(Platform::getId));
+        if (platforms.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, GamePlatform> index = allLinks.stream()
+                .collect(Collectors.toMap(GamePlatform::getPlatformId, x -> x, (a, b) -> a));
+        Map<Long, List<RegionRisk>> riskByPlatform = regionRiskService.groupByPlatform(listedIds);
+        List<PlatformPriceVO> result = new ArrayList<>(platforms.size());
+        for (Platform pf : platforms) {
+            result.add(toPlaceholderRow(pf, index.get(pf.getId()),
+                    pickRisk(riskByPlatform, pf.getId(), pf),
+                    lowMap == null ? null : lowMap.get(pf.getId()), now));
+        }
+        return result;
+    }
+
+    /** 单张占位卡片：价格全空，链接与风险照常给 */
+    private PlatformPriceVO toPlaceholderRow(Platform platform, GamePlatform link,
+                                             RegionRisk risk, HistoricalLow low, LocalDateTime now) {
+        PlatformPriceVO vo = new PlatformPriceVO();
+        vo.setPlatformId(platform.getId());
+        vo.setPlatformCode(platform.getCode());
+        vo.setPlatformName(platform.getName());
+        vo.setPlatformRegion(platform.getRegion());
+        vo.setCurrency(platform.getCurrency());
+        vo.setHasPrice(false);          // 关键标记
+        vo.setCnyAmount(null);
+        vo.setRate(null);
+        vo.setRateTime(null);
+        vo.setRecordedAt(null);
+        vo.setLowest(false);
+        vo.setDiscountActive(false);
+        vo.setDiscountRate(null);
+        vo.setDiscountEndTime(null);
+        vo.setStale(false);
+
+        String shopUrl = null;
+        if (link != null && link.getStoreUrl() != null && !link.getStoreUrl().isBlank()) {
+            shopUrl = link.getStoreUrl().trim();
+        } else {
+            shopUrl = ShopLinkBuilder.build(platform.getLinkTemplate(),
+                    link == null ? null : link.getExternalId());
+        }
+        vo.setShopUrl(shopUrl);
+        vo.setLinkAvailable(shopUrl != null);
+
+        int level = (risk == null || risk.getRiskLevel() == null) ? 0 : risk.getRiskLevel();
+        vo.setRiskLevel(level);
+        vo.setRiskReason(level > 0 ? risk.getReason() : null);
+        vo.setRiskSource(level > 0 ? risk.getSource() : null);
+        vo.setPurchasable(shopUrl != null && level < 3);
+
+        if (low != null) {   // 没价但可能有历史史低，照样标注
+            vo.setHistoryLowCny(low.getLowCny());
+            vo.setHistoryLowAmount(low.getLowAmount());
+            vo.setHistoryLowDate(low.getLowDate());
+            vo.setHistoryLowSource(low.getSource());
+        }
+        return vo;
+    }
+
 
 
     @Override

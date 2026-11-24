@@ -71,14 +71,28 @@
         ORDER BY p.game_id, p.cny_amount  -- 按游戏ID和人民币价格排序
     </select>
 
+    <!--
+    * 价格历史行数据映射结果集
+    * 用于将数据库查询结果映射到PriceHistoryRow对象
+    * @author CodeGeeX
+    * @date 2023
+    -->
     <resultMap id="PriceHistoryRowMap" type="com.gameprice.price.dto.PriceHistoryRow">
+        <!-- 游戏ID映射 -->
         <result column="game_id"       property="gameId"/>
+        <!-- 平台ID映射 -->
         <result column="platform_id"   property="platformId"/>
+        <!-- 平台代码映射 -->
         <result column="platform_code" property="platformCode"/>
+        <!-- 平台名称映射 -->
         <result column="platform_name" property="platformName"/>
+        <!-- 货币类型映射 -->
         <result column="currency"      property="currency"/>
+        <!-- 人民币金额映射 -->
         <result column="cny_amount"    property="cnyAmount"/>
+        <!-- 记录时间映射 -->
         <result column="recorded_at"   property="recordedAt"/>
+        <!-- 是否为当前价格映射 -->
         <result column="is_current"    property="isCurrent"/>
     </resultMap>
 

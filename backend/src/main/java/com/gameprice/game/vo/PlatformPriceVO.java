@@ -43,6 +43,9 @@ public class PlatformPriceVO {
     private LocalDateTime recordedAt;  // 记录时间
     private Boolean stale;        // 是否过期
     private Boolean lowest;       // 是否最低价
+    /** 该平台是否已有当前价（false = 占位卡片，前台显示"暂无报价"） */
+    private Boolean hasPrice;
+
 
     /* ---------- M7 跳转 ---------- */
     /** 生效商店链接（覆盖链接优先，其次模板生成） */
@@ -65,6 +68,11 @@ public class PlatformPriceVO {
     private java.math.BigDecimal historyLowCny;
     /** 史低原币金额 */
     private java.math.BigDecimal historyLowAmount;
+    /* ---------- 本站史低（自有历史数据，随采集/录入自动更新） ---------- */
+    /** 本站记录的最低人民币价（仅展示，不参与最低价计算） */
+    private java.math.BigDecimal lowestEverCny;
+    /** 该史低的发生时间 */
+    private java.time.LocalDateTime lowestEverAt;
     /** 史低发生日期 */
     private java.time.LocalDate historyLowDate;
     /** 史低数据源（AC-5.3 来源可追溯） */

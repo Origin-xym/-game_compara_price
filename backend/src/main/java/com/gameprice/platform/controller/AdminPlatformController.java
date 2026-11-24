@@ -46,4 +46,12 @@ public class AdminPlatformController {
         platformAdminService.changeStatus(id, status);
         return Result.ok();
     }
+
+    /** DELETE /api/admin/platforms/{id} —— 删除平台（逻辑删除，可恢复） */
+    @DeleteMapping("/{id}")
+    public Result<String> remove(@PathVariable Long id) {
+        platformAdminService.remove(id);
+        return Result.ok("平台已删除（历史数据保留，可用同编码+区域重建恢复）");
+    }
+
 }

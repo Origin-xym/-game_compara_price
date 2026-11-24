@@ -74,6 +74,19 @@ public class PlatformAdminServiceImpl implements PlatformAdminService {
     public Long create(PlatformSaveRequest request) {
         Platform platform = new Platform();
         fill(platform, request, null);
+        // 曾经删过同编码+区域的平台：直接复活，避免撞 uk_code_region
+        Platform deletedOne = platformMapper.selectByCodeRegionIgnoreDeleted(
+                platform.getCode(), platform.getRegion());
+        if (deletedOne != null && deletedOne.getDeleted() != null && deletedOne.getDeleted() == 1) {
+            platform.setId(deletedOne.getId());
+            platformMapper.restore(platform);
+            auditLogService.record("platform", "RESTORE_PLATFORM", platform.getId(),
+                    platform.getCode() + "/" + platform.getRegion(), null, snapshot(platform));
+            log.info("恢复已删除平台 id={} code={} region={}",
+                    platform.getId(), platform.getCode(), platform.getRegion());
+            return platform.getId();
+        }
+
         ensureUnique(platform.getCode(), platform.getRegion(), null);
 
         platformMapper.insert(platform);
@@ -144,6 +157,22 @@ public class PlatformAdminServiceImpl implements PlatformAdminService {
                 Map.of("enabled", old.getEnabled()), Map.of("enabled", enabled));
         log.info("平台状态变更 id={} enabled={}（其价格即时退出/进入全站口径）", id, enabled);
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void remove(Long id) {
+        Platform old = platformMapper.selectById(id);
+        if (old == null) {
+            throw new BizException(ErrorCode.PLATFORM_NOT_FOUND);
+        }
+        // @TableLogic → deleted=1：前台与采集立即不可见，历史价/链接留在库里可恢复
+        platformMapper.deleteById(id);
+        auditLogService.record("platform", "DELETE_PLATFORM", id,
+                old.getCode() + "/" + old.getRegion(), snapshot(old), null);
+        log.info("删除平台（逻辑删除）id={} code={} region={}，历史数据保留",
+                id, old.getCode(), old.getRegion());
+    }
+
 
     /* ---------------- 内部工具 ---------------- */
 

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { getPriceHistory } from '@/api/game'
 
@@ -8,8 +8,6 @@ const props = defineProps({
   platforms: { type: Array, default: () => [] }
 })
 
-/** null 表示「自动选平台」：取采样点最多的那个 */
-const platformId = ref(null)
 const days = ref(90)
 const loading = ref(false)
 const trend = ref(null)
@@ -22,41 +20,30 @@ const dayOptions = [
   { label: '近 12 月', value: 365 }
 ]
 
+// 折线配色（按平台顺序取，超过 7 个平台循环使用）
+const COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#909399', '#9a60b4', '#36cfc9']
+
+/** 只有真正有采样点的平台才画线 */
+const seriesList = computed(() =>
+  (trend.value?.platforms || []).filter((p) => (p.points?.length || 0) > 0)
+)
+
+/** 全部平台都只有 1 个点时，给出"仅显示采样点"的提示 */
+const allInsufficient = computed(
+  () => seriesList.value.length > 0 && seriesList.value.every((p) => p.insufficient)
+)
+
 async function fetchTrend() {
   loading.value = true
   try {
-    // 一次取全部平台，platformId 只做视图切换（避免切平台时的空白期）
+    // 一次取全部平台：不再按平台切换视图
     const data = await getPriceHistory(props.gameId, { days: days.value })
     trend.value = data
-
-    // AC-5.1：首次进入自动选中「采样点最多」的平台，而不是价格最低的那个
-    const list = data?.platforms || []
-    if (!platformId.value || !list.some((p) => p.platformId === platformId.value)) {
-      platformId.value = pickBestPlatform(list)?.platformId ?? null
-    }
-
     await nextTick()
     renderChart()
   } finally {
     loading.value = false
   }
-}
-
-/** 采样点最多优先；并列时优先有史低标注的 */
-function pickBestPlatform(list) {
-  if (!list.length) return null
-  return [...list].sort((a, b) => {
-    const diff = (b.points?.length || 0) - (a.points?.length || 0)
-    if (diff !== 0) return diff
-    return (b.historyLowCny != null ? 1 : 0) - (a.historyLowCny != null ? 1 : 0)
-  })[0]
-}
-
-function currentSeries() {
-  const list = trend.value?.platforms || []
-  if (!list.length) return null
-  if (!platformId.value) return pickBestPlatform(list)
-  return list.find((p) => p.platformId === platformId.value) || pickBestPlatform(list)
 }
 
 /** 统一管理实例：DOM 变了就重建，避免绑在已移除的节点上画图（白屏根因） */
@@ -71,60 +58,75 @@ function ensureChart() {
   return chart
 }
 
-function renderChart() {
-  const series = currentSeries()
+function disposeChart() {
+  if (chart) {
+    chart.clear()
+    chart.dispose()
+    chart = null
+  }
+}
 
-  // AC-5.4：采样不足不画曲线，只清空画布
-  if (!series || series.insufficient) {
-    if (chart) {
-      chart.clear()
-      chart.dispose()
-      chart = null
-    }
+function renderChart() {
+  const list = seriesList.value
+
+  // 一个采样点都没有：清空画布，交给模板里的空状态
+  if (!list.length) {
+    disposeChart()
     return
   }
 
   const instance = ensureChart()
   if (!instance) return
 
-  const points = series.points.map((p) => [p.recordedAt, Number(p.cnyAmount)])
-  const low = series.historyLowCny != null ? Number(series.historyLowCny) : null
-  const minPoint = Math.min(...series.points.map((p) => Number(p.cnyAmount)))
-
-  // 数据自检：史低高于任一样本点时画出来会自相矛盾，宁可不画
-  const showLowLine = low != null && low <= minPoint
-  if (low != null && !showLowLine) {
-    console.warn(`[trend] 史低 ¥${low} 高于样本最低 ¥${minPoint}，已跳过史低线，请校准数据`)
-  }
+  const series = list.map((p, i) => {
+    const color = COLORS[i % COLORS.length]
+    const points = p.points.map((x) => [x.recordedAt, Number(x.cnyAmount)])
+    const low = p.historyLowCny != null ? Number(p.historyLowCny) : null
+    const minPoint = Math.min(...points.map((x) => x[1]))
+    // 数据自检：史低高于任一样本点时画出来会自相矛盾，宁可不画
+    const showLowLine = low != null && low <= minPoint
+    if (low != null && !showLowLine) {
+      console.warn(`[trend] ${p.platformName} 史低 ¥${low} 高于样本最低 ¥${minPoint}，已跳过史低线`)
+    }
+    return {
+      name: p.platformName,
+      type: 'line',
+      step: 'end',
+      showSymbol: true,
+      symbolSize: 7,
+      data: points,
+      itemStyle: { color },
+      // 不足 2 个点的平台只显示圆点，不连线（避免"一条假直线"）
+      lineStyle: p.insufficient ? { width: 0, color } : { width: 2, color },
+      markLine: showLowLine
+        ? {
+            silent: true,
+            symbol: 'none',
+            label: {
+              formatter: `${p.platformName} 史低 ¥${low.toFixed(2)}`,
+              position: 'insideEndTop'
+            },
+            lineStyle: { type: 'dashed', color: '#f56c6c', opacity: 0.55 },
+            data: [{ yAxis: low }]
+          }
+        : undefined
+    }
+  })
 
   instance.setOption(
     {
-      grid: { left: 56, right: 24, top: 34, bottom: 40 },
-      tooltip: { trigger: 'axis', valueFormatter: (v) => `¥${Number(v).toFixed(2)}` },
+      color: COLORS,
+      grid: { left: 56, right: 28, top: 40, bottom: 40 },
+      legend: { top: 0, right: 0, type: 'scroll', icon: 'roundRect', itemHeight: 8 },
+      tooltip: {
+        trigger: 'axis',
+        valueFormatter: (v) => (v == null ? '—' : `¥${Number(v).toFixed(2)}`)
+      },
       xAxis: { type: 'time', boundaryGap: false, axisLabel: { formatter: '{MM}-{dd}' } },
       yAxis: { type: 'value', name: '人民币', axisLabel: { formatter: '¥{value}' } },
-      series: [
-        {
-          name: `${series.platformName} 价格`,
-          type: 'line',
-          showSymbol: true,
-          step: 'end',
-          data: points,
-          lineStyle: { width: 2, color: '#409eff' },
-          areaStyle: { opacity: 0.08, color: '#409eff' },
-          markLine: showLowLine
-            ? {
-                silent: true,
-                symbol: 'none',
-                label: { formatter: `史低 ¥${low.toFixed(2)}`, position: 'insideEndTop' },
-                lineStyle: { type: 'dashed', color: '#f56c6c' },
-                data: [{ yAxis: low }]
-              }
-            : undefined
-        }
-      ]
+      series
     },
-    true // notMerge：不残留上一维度（AC-5.5）
+    true // notMerge：切区间/换游戏不残留上一条线
   )
   instance.resize()
 }
@@ -133,9 +135,8 @@ function handleResize() {
   chart && chart.resize()
 }
 
-watch(days, () => fetchTrend())            // 区间变化 → 重新请求
-watch(platformId, () => nextTick(renderChart))  // 平台变化 → 只重绘
-
+watch(days, () => fetchTrend())       // 区间变化 → 重新请求
+watch(() => props.gameId, () => fetchTrend())
 
 onMounted(() => {
   fetchTrend()
@@ -144,8 +145,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
-  chart && chart.dispose()
-  chart = null
+  disposeChart()
 })
 </script>
 
@@ -158,21 +158,11 @@ onBeforeUnmount(() => {
         </el-radio-button>
       </el-radio-group>
 
-      <el-select
-        v-model="platformId"
-        size="small"
-        placeholder="选择平台"
-        style="width: 180px">
-        <el-option
-          v-for="p in (trend?.platforms || [])"
-          :key="p.platformId"
-          :label="`${p.platformName}（${p.points.length} 点）`"
-          :value="p.platformId" />
-      </el-select>
-
-      <span v-if="currentSeries()?.historyLowSource" class="low-source">
-        史低来源：{{ currentSeries().historyLowSource }}
-        <span v-if="currentSeries().historyLowDate"> · {{ currentSeries().historyLowDate }}</span>
+      <span class="legend-note">
+        {{ seriesList.length }} 个平台有价格记录（一平台一条折线）
+      </span>
+      <span v-if="allInsufficient" class="legend-note warn">
+        采样点不足 2 个的平台仅显示为圆点，采集积累后自动连线
       </span>
     </div>
 
@@ -180,8 +170,8 @@ onBeforeUnmount(() => {
       <!-- canvas 常驻 DOM，避免摘除节点导致实例失效 -->
       <div ref="chartRef" class="chart-canvas"></div>
 
-      <div v-if="currentSeries()?.insufficient" class="chart-empty">
-        <el-empty description="数据积累中：该平台近期采样点不足 2 个，暂不绘制走势" />
+      <div v-if="!loading && !seriesList.length" class="chart-empty">
+        <el-empty description="暂无价格记录：采集或录入价格后开始积累走势" />
       </div>
     </div>
   </div>
@@ -190,7 +180,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .price-chart { margin-top: 12px; }
 .chart-bar { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
-.low-source { font-size: 12px; color: #a8abb2; }
+.legend-note { font-size: 12px; color: #a8abb2; }
+.legend-note.warn { color: #e6a23c; }
 .chart-wrap { position: relative; }
 .chart-canvas { width: 100%; height: 320px; }
 .chart-empty {

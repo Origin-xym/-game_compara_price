@@ -1,5 +1,6 @@
 package com.gameprice.collect.source;
-
+import org.springframework.core.annotation.Order;
+import java.util.Set;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.gameprice.collect.dto.CollectItem;
 import com.gameprice.game.entity.GamePlatform;
@@ -32,6 +33,7 @@ import java.util.List;
  */
 @Slf4j
 @Component
+@Order(100)
 @RequiredArgsConstructor
 public class MockPriceSource implements PriceSource {
 
@@ -44,14 +46,20 @@ public class MockPriceSource implements PriceSource {
     private boolean mockEnabled;
 
     @Override
-    public boolean supports(Platform platform) {
-        if (!mockEnabled) {
-            return false;
-        }
-        // 一期只有 Steam / Xbox 记为「有官方接口」的平台
-        return "STEAM".equalsIgnoreCase(platform.getCode())
-                || "XBOX".equalsIgnoreCase(platform.getCode());
+    public Set<String> platformCodes() {
+        return Set.of("STEAM", "EPIC", "XBOX");   // Mock 可以覆盖任何平台，仅用于异常场景
     }
+
+    @Override
+    public boolean enabled() {
+        return mockEnabled;
+    }
+
+    @Override
+    public boolean supportsScenario(String scenario) {
+        return true;   // 异常场景全接；NORMAL 时优先级低于 @Order(1)/(2) 的真实源
+    }
+
 
     @Override
     public int sourceType() {

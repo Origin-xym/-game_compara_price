@@ -24,3 +24,9 @@ export function approvePrice(id) {
 export function rejectPrice(id, reason) {
   return request.post(`/admin/prices/${id}/reject`, { reason })
 }
+
+// 手动录入价格（M12 手工维护一路，对应后端 POST /api/admin/prices）
+export function createManualPrice(data) {
+  return request.post('/admin/prices', data)
+}
+

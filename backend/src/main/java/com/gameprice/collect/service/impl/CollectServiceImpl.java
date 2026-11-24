@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import com.gameprice.collect.source.SourceRegistry;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -42,7 +43,7 @@ public class CollectServiceImpl implements CollectService {
     private final PlatformMapper platformMapper;
     private final CollectTaskLogMapper collectTaskLogMapper;
     private final CollectPriceWriter collectPriceWriter;
-    private final List<PriceSource> sources;    // Spring 注入全部采集源实现
+    private final SourceRegistry sourceRegistry;    // Spring 注入全部采集源实现
 
     @Value("${app.collect.volatility-threshold:0.5}")
     private BigDecimal volatilityThreshold;
@@ -65,12 +66,6 @@ public class CollectServiceImpl implements CollectService {
             throw new BizException(ErrorCode.PLATFORM_NOT_SUPPORTED, "该平台数据源尚未就绪");
         }
 
-        PriceSource source = sources.stream()
-                .filter(s -> s.supports(platform))
-                .findFirst()
-                .orElseThrow(() -> new BizException(ErrorCode.PLATFORM_NOT_SUPPORTED,
-                        "该平台暂无可用采集器"));
-
         String batchNo = platform.getCode() + "-" + platform.getRegion() + "-"
                 + LocalDateTime.now().format(BATCH_FMT) + "-"
                 + ThreadLocalRandom.current().nextInt(1000, 9999);
@@ -91,6 +86,19 @@ public class CollectServiceImpl implements CollectService {
         taskLog.setFailCount(0);
         taskLog.setStatus(0);
         collectTaskLogMapper.insert(taskLog);
+
+        // 没有采集器的平台也要留痕：写明原因，别让后台看起来"点了没反应"
+        PriceSource source = sourceRegistry.find(platform, scenario);
+        if (source == null) {
+            String msg = "该平台暂无可用采集器（当前已接入："
+                    + String.join(",", sourceRegistry.codes()) + "）";
+            taskLog.setEndTime(LocalDateTime.now());
+            taskLog.setStatus(3);
+            taskLog.setErrorMsg(msg);
+            collectTaskLogMapper.updateById(taskLog);
+            throw new BizException(ErrorCode.PLATFORM_NOT_SUPPORTED, msg);
+        }
+
 
         int success = 0, fail = 0, queue = 0, skip = 0, total = 0;
         String errorMsg = null;
@@ -117,7 +125,11 @@ public class CollectServiceImpl implements CollectService {
                     }
                 }
             }
-            status = fail == 0 ? 1 : 2;
+            status = total == 0 ? 3 : (fail == 0 ? 1 : 2);
+            if (total == 0) {
+                errorMsg = "本批次未取到任何价格（检查网络/证书/币种，详见日志）";
+            }
+
         } catch (Exception e) {
             // 整批失败：不写任何价格，旧价保留（AC-12.3）
             status = 3;

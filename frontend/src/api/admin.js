@@ -79,4 +79,10 @@ export function changePlatformStatus(id, status) {
   return request.put(`/admin/platforms/${id}/status`, null, { params: { status } })
 }
 
+// 删除平台（逻辑删除，历史数据保留）
+export function deletePlatform(id) {
+  return request.delete(`/admin/platforms/${id}`)
+}
+
+
 

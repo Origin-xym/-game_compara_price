@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -78,10 +79,22 @@ public class CollectPriceWriter {
                 .eq(PriceRecord::getIsCurrent, 1)
                 .last("LIMIT 1"));
 
-        // 价格没变：不产生历史点，避免走势被同日重复点污染（AC-5.x）
+        // 价格没变：同日去重、跨天必写（B 方案）
+        // 当天已有生效采样点 → 跳过（反复点采集不灌水）；
+        // 当天还没有点 → 继续往下走，补一条当前价的历史点，保证走势每天至少一个样本。
         if (current != null && current.getCnyAmount() != null
                 && current.getCnyAmount().compareTo(cny) == 0) {
-            return 0;
+            LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+            long todayCount = priceRecordMapper.selectCount(new LambdaQueryWrapper<PriceRecord>()
+                    .eq(PriceRecord::getGameId, item.getGameId())
+                    .eq(PriceRecord::getPlatformId, item.getPlatformId())
+                    .eq(PriceRecord::getStatus, 1)          // 只认生效点：待确认/已驳回不算当天样本
+                    .ge(PriceRecord::getRecordedAt, todayStart));
+            if (todayCount > 0) {
+                return 0;
+            }
+            log.info("价格未变但今日无采样点，补一条历史点 gameId={} platformId={} cny={}",
+                    item.getGameId(), item.getPlatformId(), cny);
         }
 
         PriceRecord record = new PriceRecord();

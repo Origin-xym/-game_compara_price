@@ -15,6 +15,7 @@ export default defineConfig({
   },
   server: { // 开发服务器配置
     port: 5173, // 服务器端口号
+    allowedHosts: true,   // 允许通过 tunnel 域名访问（Vite 5.4.12+ 默认会拦非本机 Host）
     proxy: { // 代理配置
       // 后端 context-path 是 /api，这里不做 rewrite
       '/api': { // 配置 /api 路径的代理

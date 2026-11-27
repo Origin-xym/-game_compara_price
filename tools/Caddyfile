@@ -1,0 +1,13 @@
+:8090 {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8081
+	}
+
+	handle {
+		root * D:/游戏比价平台/frontend/dist
+		try_files {path} /index.html
+		file_server
+	}
+}

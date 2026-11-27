@@ -128,6 +128,11 @@ public class CollectServiceImpl implements CollectService {
             status = total == 0 ? 3 : (fail == 0 ? 1 : 2);
             if (total == 0) {
                 errorMsg = "本批次未取到任何价格（检查网络/证书/币种，详见日志）";
+            } else if (success == 0 && fail == 0 && skip > 0) {
+                // 同日去重：价格没变时不新增记录，避免一天写多行；这里写清原因，避免“成功 0”看着像失败
+                errorMsg = "本次未新增记录：" + skip + " 条今日已有同价记录（同日去重），价格无变化";
+            } else if (skip > 0) {
+                errorMsg = "其中 " + skip + " 条价格无变化已跳过（同日去重）";
             }
 
         } catch (Exception e) {

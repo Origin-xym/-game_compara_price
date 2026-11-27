@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'  // 从Vue中引入reactive、ref和onMounted等响应式API
 import { ElMessage, ElMessageBox } from 'element-plus'  // 从Element Plus引入消息提示和消息框组件
-import { adminListGames, createGame, updateGame, changeGameStatus } from '@/api/admin'  // 从admin API模块引入游戏管理相关接口
+import { adminListGames, createGame, updateGame, changeGameStatus, searchSteamGames, importSteamGame } from '@/api/admin'  // 从admin API模块引入游戏管理相关接口
 import { listGameTypes } from '@/api/meta'  // 从meta API模块引入游戏类型列表接口
 import { useUserStore } from '@/stores/user'  // 引入用户状态管理store
 // 从 @/api/admin 模块中导入 adminListLinks 和 saveLink 两个函数
@@ -231,6 +231,57 @@ async function saveLinkRow(row) {
 }
 
 
+/* ---------- Steam 搜索导入 ---------- */
+const importVisible = ref(false)      // 导入弹窗
+const importKeyword = ref('')         // 搜索关键词
+const importLoading = ref(false)      // 搜索中
+const importResults = ref([])         // 候选列表
+const importingAppId = ref(null)      // 正在导入的 appId
+const importTypeId = ref(null)        // 手动指定类型；为空则用候选项推荐类型
+
+/** 打开导入弹窗 */
+function openImport() {
+  importVisible.value = true
+  importKeyword.value = ''
+  importResults.value = []
+  importTypeId.value = null
+}
+
+/** 搜索 Steam */
+async function doImportSearch() {
+  const kw = importKeyword.value.trim()
+  if (!kw) {
+    ElMessage.warning('请输入游戏关键词')
+    return
+  }
+  importLoading.value = true
+  try {
+    importResults.value = (await searchSteamGames(kw)) || []
+    if (importResults.value.length === 0) ElMessage.info('没搜到可导入的游戏，换个关键词试试')
+  } finally {
+    importLoading.value = false
+  }
+}
+
+/** 选中某个候选 → 一键导入 */
+async function doImport(candidate) {
+  importingAppId.value = candidate.appId
+  try {
+    const gameId = await importSteamGame({
+      appId: candidate.appId,
+      gameTypeId: importTypeId.value || candidate.suggestedTypeId || null
+    })
+    ElMessage.success(`已导入《${candidate.name}》（ID=${gameId}），点一次“立即采集”即可抓取价格`)
+    candidate.exists = true
+    candidate.existingGameId = gameId
+    fetchList()
+  } catch (e) {
+    if (e.errors) fieldErrors.value = e.errors
+  } finally {
+    importingAppId.value = null
+  }
+}
+
 /**
  * 组件挂载时的生命周期钩子
  * 非管理员用户直接返回，不执行后续操作
@@ -273,6 +324,7 @@ onMounted(async () => {
       <!-- 间隔元素 -->
         <div class="spacer"></div>
       <!-- 新增游戏按钮 -->
+        <el-button type="success" @click="openImport">Steam 搜索导入</el-button>
         <el-button type="primary" @click="openCreate">新增游戏</el-button>
       </div>
 
@@ -327,6 +379,69 @@ onMounted(async () => {
           @current-change="handlePageChange" />
       </div>
     </template>
+
+  <!-- Steam 搜索导入对话框 -->
+    <el-dialog v-model="importVisible" title="从 Steam 导入游戏" width="760px">
+      <div class="imp-search">
+        <el-input
+          v-model="importKeyword"
+          placeholder="输入游戏名，如 赛博朋克 / Elden Ring / Civilization"
+          clearable
+          @keyup.enter="doImportSearch" />
+        <el-button type="primary" :loading="importLoading" @click="doImportSearch">搜索</el-button>
+      </div>
+      <div class="imp-tip">
+        选中结果点“添加”，名称、英文名、封面、简介、发行年份会自动写入，并自动绑定 Steam 平台链接。价格在导入后由“立即采集”或每日 04:00 定时任务抓取。
+      </div>
+
+      <div v-loading="importLoading" class="imp-list">
+        <el-empty
+          v-if="!importLoading && importResults.length === 0"
+          description="输入关键词后点搜索，或换个关键词再试"
+          :image-size="60" />
+        <div v-for="c in importResults" :key="c.appId" class="imp-item">
+          <img v-if="c.coverUrl" :src="c.coverUrl" class="imp-cover" :alt="c.name" />
+          <div v-else class="imp-cover imp-cover-empty">无封面</div>
+          <div class="imp-info">
+            <div class="imp-name">
+              {{ c.name }}
+              <span v-if="c.nameEn" class="imp-en">{{ c.nameEn }}</span>
+            </div>
+            <div class="imp-sub">
+              <span v-if="c.releaseYear">{{ c.releaseYear }} 年</span>
+              <span v-if="c.suggestedTypeName" class="imp-type-tag">{{ c.suggestedTypeName }}</span>
+              <span v-if="c.genres && c.genres.length" class="imp-genres">{{ c.genres.join(' / ') }}</span>
+              <span v-if="c.priceCny !== null && c.priceCny !== undefined" class="imp-price">
+                ¥{{ Number(c.priceCny).toFixed(2) }}
+                <em v-if="c.discountRate">-{{ c.discountRate }}%</em>
+              </span>
+              <span v-else class="imp-noprice">暂无人民币价格</span>
+            </div>
+            <div v-if="c.summary" class="imp-summary">{{ c.summary }}</div>
+          </div>
+          <div class="imp-action">
+            <el-tag v-if="c.exists" type="info">已存在</el-tag>
+            <el-button
+              v-else
+              type="primary"
+              size="small"
+              :loading="importingAppId === c.appId"
+              @click="doImport(c)">添加</el-button>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="imp-footer">
+          <span class="imp-footer-label">导入类型</span>
+          <el-select v-model="importTypeId" size="small" clearable placeholder="自动（按 Steam 分类）" style="width: 190px">
+            <el-option v-for="t in types" :key="t.id" :label="t.name" :value="t.id" />
+          </el-select>
+          <div class="spacer"></div>
+          <el-button @click="importVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
 
   <!-- 新增/编辑游戏对话框 -->
     <el-dialog
@@ -424,5 +539,43 @@ onMounted(async () => {
 .pager { display: flex; justify-content: center; margin-top: 20px; }
 .eff-url { font-size: 12px; color: #909399; word-break: break-all; }
 .link-tip { margin-top: 10px; font-size: 12px; color: #a8abb2; }
+
+/* ---------- Steam 导入弹窗样式 ---------- */
+.imp-search { display: flex; gap: 10px; }
+.imp-tip { margin: 10px 0 12px; font-size: 12px; color: #a8abb2; line-height: 1.6; }
+.imp-list { max-height: 460px; overflow-y: auto; }
+.imp-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+.imp-item:hover { border-color: #c6e2ff; background: #fafcff; }
+.imp-cover { width: 138px; aspect-ratio: 460 / 215; object-fit: cover; border-radius: 6px; background: #f5f7fa; flex: none; }
+.imp-cover-empty { display: flex; align-items: center; justify-content: center; color: #c0c4cc; font-size: 12px; }
+.imp-info { flex: 1; min-width: 0; }
+.imp-name { font-size: 15px; font-weight: 600; color: #303133; }
+.imp-en { font-size: 12px; color: #909399; font-weight: 400; margin-left: 6px; }
+.imp-sub { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 6px 0; font-size: 12px; color: #606266; }
+.imp-type-tag { color: #409eff; background: #ecf5ff; border-radius: 4px; padding: 0 6px; line-height: 18px; }
+.imp-genres { color: #a8abb2; }
+.imp-price { color: #f56c6c; font-weight: 700; }
+.imp-price em { font-style: normal; font-size: 11px; background: #fef0f0; border-radius: 3px; padding: 0 4px; margin-left: 4px; }
+.imp-noprice { color: #a8abb2; }
+.imp-summary {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.imp-action { flex: none; padding-top: 2px; }
+.imp-footer { display: flex; align-items: center; gap: 8px; }
+.imp-footer-label { font-size: 13px; color: #606266; }
 
 </style>

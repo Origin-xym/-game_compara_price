@@ -31,6 +31,22 @@ export function changeGameStatus(id, status) {
 }
 
 /**
+ * 按关键词搜索 Steam，返回可一键导入的候选列表
+ * @param {string} keyword 游戏关键词
+ */
+export function searchSteamGames(keyword) {
+  return request.get('/admin/games/steam-search', { params: { keyword } })
+}
+
+/**
+ * 按 appId 一键导入游戏（自动带出名称/英文名/封面/简介/年份，并绑定 Steam 平台）
+ * @param {Object} data { appId, gameTypeId?, platformId?, sortWeight? }
+ */
+export function importSteamGame(data) {
+  return request.post('/admin/games/import-steam', data)
+}
+
+/**
  * 获取指定游戏的管理员链接列表
  * @param {string|number} gameId - 游戏ID
  * @returns {Promise} 返回一个Promise对象，包含请求结果

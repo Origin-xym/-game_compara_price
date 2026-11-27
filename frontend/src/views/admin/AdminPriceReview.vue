@@ -94,9 +94,14 @@ async function doRun() {
   running.value = true
   try {
     const r = await runCollect({ platformId: runForm.platformId, scenario: runForm.scenario })
-    ElMessage.success(
-      `采集完成：总数 ${r.total} / 成功 ${r.successCount} / 进队列 ${r.queueCount} / 跳过 ${r.skipCount} / 失败 ${r.failCount}`
-    )
+    if (r.successCount === 0 && r.failCount === 0 && r.skipCount > 0) {
+      // 全是“同日同价跳过”，不是失败，别用绿色成功把自己骗了
+      ElMessage.info(`本次价格无变化：${r.skipCount} 条今日已有同价记录，未新增（同日去重）`)
+    } else {
+      ElMessage.success(
+        `采集完成：总数 ${r.total} / 新增 ${r.successCount} / 进队列 ${r.queueCount} / 跳过 ${r.skipCount} / 失败 ${r.failCount}`
+      )
+    }
     logPage.value = 1
     fetchLogs()
     fetchPending()
@@ -261,14 +266,14 @@ onMounted(async () => {
           <el-table-column prop="startTime" label="开始" width="160" />
           <el-table-column prop="endTime" label="结束" width="160" />
           <el-table-column prop="total" label="总数" width="70" />
-          <el-table-column prop="successCount" label="成功" width="70" />
+          <el-table-column prop="successCount" label="新增" width="70" />
           <el-table-column prop="failCount" label="失败" width="70" />
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
               <el-tag :type="statusTagType(row.status)">{{ row.statusText }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="errorMsg" label="失败原因" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="errorMsg" label="备注 / 原因" min-width="240" show-overflow-tooltip />
         </el-table>
         <el-empty v-if="!logLoading && logList.length === 0" description="还没有采集记录" />
         <div v-if="logTotal > logSize" class="pager">

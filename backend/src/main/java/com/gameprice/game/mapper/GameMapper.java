@@ -6,6 +6,7 @@ import com.gameprice.game.dto.GameListQuery;
 import com.gameprice.game.entity.Game;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -24,4 +25,11 @@ public interface GameMapper extends BaseMapper<Game> {  // 继承BaseMapper<Game
  * @return 返回分页后的游戏列表结果
  */
     List<Game> selectAppPage(IPage<Game> page, @Param("q")GameListQuery query);
+
+    /**
+     * 忽略空白与全角空格的名称查重（Steam 返回“赛博朋克 2077”，库里是“赛博朋克2077”）。
+     * 仅用于 Steam 导入的“是否已存在”判断，不改变 uk_name 的严格唯一约束。
+     */
+    @Select("SELECT * FROM game WHERE REPLACE(REPLACE(name, ' ', ''), '　', '') = #{normalized} LIMIT 1")
+    Game selectByNameLoose(@Param("normalized") String normalized);
 }

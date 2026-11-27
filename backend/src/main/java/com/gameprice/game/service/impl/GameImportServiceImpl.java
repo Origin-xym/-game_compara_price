@@ -117,7 +117,7 @@ public class GameImportServiceImpl implements GameImportService {
     }
 
     /** appId → 候选对象；非 game 类型或接口失败返回 null */
-    private SteamSearchItemVO buildCandidate(String appId) throws Exception {
+    private SteamSearchItemVO buildCandidate(String appId) {
         JsonNode zh = detail(appId, "schinese", "cn");
         if (zh == null) {
             return null;
@@ -163,7 +163,7 @@ public class GameImportServiceImpl implements GameImportService {
             vo.setDiscountRate(price.path("discount_percent").asInt(0));
         }
 
-        Game existing = findByName(name);
+        Game existing = findExisting(name, appId);
         vo.setExists(existing != null);
         vo.setExistingGameId(existing == null ? null : existing.getId());
         return vo;
@@ -186,10 +186,11 @@ public class GameImportServiceImpl implements GameImportService {
             throw new BizException(ErrorCode.EXTERNAL_SOURCE_ERROR, "Steam 未返回游戏名称，请稍后重试");
         }
 
-        Game existing = findByName(name);
+        Game existing = findExisting(name, appId);
         if (existing != null) {
             throw new BizException(ErrorCode.DUPLICATE_GAME,
-                    "该游戏已存在（ID=" + existing.getId() + "），可在列表中点“链接”补充平台，或直接编辑",
+                    "该游戏已存在（ID=" + existing.getId() + "，名称：" + existing.getName()
+                            + "），可在列表中点“链接”补充平台，或直接编辑",
                     Map.of("name", "该游戏已存在，无需重复导入"));
         }
 
@@ -250,7 +251,7 @@ public class GameImportServiceImpl implements GameImportService {
     // ------------------------------------------------------------------ 工具
 
     /** 调 appdetails，返回 data 节点；接口失败/无数据返回 null */
-    private JsonNode detail(String appId, String lang, String cc) throws Exception {
+    private JsonNode detail(String appId, String lang, String cc) {
         JsonNode root = getJson(String.format(DETAIL_API, appId, lang, cc));
         if (root == null) {
             return null;
@@ -283,10 +284,33 @@ public class GameImportServiceImpl implements GameImportService {
         }
     }
 
-    private Game findByName(String name) {
-        return gameMapper.selectOne(new LambdaQueryWrapper<Game>()
-                .eq(Game::getName, name)
-                .last("LIMIT 1"));
+    /**
+     * 判定“是否已在库里”，两条通道：
+     *  1. 按 Steam appId 反查 game_platform（最可靠：即使名字被改过也能认出）；
+     *  2. 按忽略空白的名称比对（Steam 的“赛博朋克 2077”能命中库里的“赛博朋克2077”）。
+     */
+    private Game findExisting(String name, String appId) {
+        List<Long> steamIds = platformMapper.selectList(new LambdaQueryWrapper<Platform>()
+                        .eq(Platform::getCode, "STEAM"))
+                .stream().map(Platform::getId).toList();
+        if (!steamIds.isEmpty() && appId != null) {
+            GamePlatform link = gamePlatformMapper.selectOne(new LambdaQueryWrapper<GamePlatform>()
+                    .in(GamePlatform::getPlatformId, steamIds)
+                    .eq(GamePlatform::getExternalId, appId)
+                    .last("LIMIT 1"));
+            if (link != null) {
+                Game linked = gameMapper.selectById(link.getGameId());
+                if (linked != null) {
+                    return linked;
+                }
+            }
+        }
+        return gameMapper.selectByNameLoose(normalizeName(name));
+    }
+
+    /** 去掉所有空白（含全角空格），仅用于查重比较 */
+    private String normalizeName(String name) {
+        return name == null ? "" : name.replaceAll("[\\s\\u3000]", "");
     }
 
     /** 默认 STEAM/CN；其次任意 enabled 的 STEAM */

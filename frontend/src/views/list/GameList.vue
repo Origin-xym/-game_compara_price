@@ -20,7 +20,7 @@ const loading = ref(false) // 加载状态
 const list = ref([]) // 游戏列表数据
 const total = ref(0) // 总游戏数量
 const page = ref(1) // 当前页码
-const size = ref(12) // 每页显示数量
+const size = ref(20) // 每页显示数量：取 5 列与 4 列的公倍数，保证每页都是整行、不会出现“半行孤零零”
 
 
 
@@ -251,11 +251,15 @@ onMounted(async () => {
 .toolbar h2 { margin: 0; font-size: 20px; color: #303133; }
 .count { color: #909399; font-size: 13px; }
 .grid-wrap { min-height: 400px; }
+/* 固定列数（而不是 auto-fill）：列数固定才能和「每页 20 条」整除，每页行数一致，不会一页满一页空 */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-items: stretch;      /* 同一行卡片等高 */
+  align-content: start;      /* 行不拉伸，短页就紧凑收在顶部 */
   gap: 16px;
 }
+@media (max-width: 1360px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 900px)  { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .pager { display: flex; justify-content: center; margin-top: 24px; }
 </style>

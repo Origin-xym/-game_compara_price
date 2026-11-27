@@ -52,7 +52,7 @@ function formatPrice(v) {
           :key="i"
           :class="{ hit: seg.hit }">{{ seg.text }}</span>
       </h3>
-      <!-- 游戏元信息（类型和平台） -->
+      <!-- 游戏元信息（类型和平台）：最多显示 2 个平台 + “+N”，且强制单行，防止标签换行把卡片撑高 -->
       <div class="meta">
         <el-tag v-if="item.gameTypeName" size="small" type="info">
           <span
@@ -60,8 +60,14 @@ function formatPrice(v) {
             :key="i"
             :class="{ hit: seg.hit }">{{ seg.text }}</span>
         </el-tag>
-        <span v-for="p in item.platforms" :key="p.platformId" class="platform-tag">
+        <span v-for="p in (item.platforms || []).slice(0, 2)" :key="p.platformId" class="platform-tag">
           {{ p.name }}
+        </span>
+        <span
+          v-if="(item.platforms || []).length > 2"
+          class="platform-tag more"
+          :title="item.platforms.map(p => p.name).join(' / ')">
+          +{{ item.platforms.length - 2 }}
         </span>
       </div>
 
@@ -139,8 +145,17 @@ function formatPrice(v) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 元信息区域样式 */
-.meta { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
+/* 元信息区域样式：固定单行高度，标签多了就裁掉，保证同排卡片的名字/价格都对齐 */
+.meta {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  overflow: hidden;
+}
+/* “+N” 省略标签：提示还有几个平台，鼠标悬停看全量 */
+.platform-tag.more { color: #909399; border-color: #e4e7ed; background: #f4f4f5; cursor: default; }
 /* 平台标签样式 */
 .platform-tag {
   font-size: 12px;

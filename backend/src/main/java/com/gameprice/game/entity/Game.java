@@ -43,6 +43,9 @@ public class Game extends BaseEntity {
     /** 游戏发行年份 */
     private Integer releaseYear;
 
+    /** 精确发行日期（由 Steam 接口校验/补齐，可能为空） */
+    private java.time.LocalDate releaseDate;
+
     /** 1 上架 0 下架（AC-11.3）；下架用状态而非删除，保证 uk_name 干净 */
     private Integer status;
 

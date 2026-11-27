@@ -15,4 +15,21 @@ foreach ($p in $ports) {
         }
     }
 }
+
+# 采集用浏览器（Epic 浏览器渲染采集会拉起一个 Edge/Chrome，窗口在屏幕外常驻）也需要一起收
+# 只匹配本项目专用目录/调试端口的进程，不会动用户自己的浏览器
+$browserProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+        ($_.Name -eq 'msedge.exe' -or $_.Name -eq 'chrome.exe') -and
+        ($_.CommandLine -like '*gameprice-browser*' -or $_.CommandLine -like '*remote-debugging-port=9333*')
+    }
+if ($browserProcs) {
+    foreach ($b in $browserProcs) {
+        Stop-Process -Id $b.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host ("停止采集浏览器进程 {0} 个" -f @($browserProcs).Count)
+} else {
+    Write-Host '采集浏览器未运行'
+}
+
 Write-Host '完成。'

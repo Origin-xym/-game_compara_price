@@ -47,6 +47,14 @@ export function importSteamGame(data) {
 }
 
 /**
+ * 批量补齐 Epic 链接：后端逐款用浏览器搜 Epic 商店，命中才建链接。
+ * 走浏览器渲染，20 款约 1~2 分钟，这里单独放宽超时到 5 分钟。
+ */
+export function backfillEpicLinks() {
+  return request.post('/admin/games/epic-links/backfill', null, { timeout: 300000 })
+}
+
+/**
  * 获取指定游戏的管理员链接列表
  * @param {string|number} gameId - 游戏ID
  * @returns {Promise} 返回一个Promise对象，包含请求结果
@@ -102,3 +110,13 @@ export function deletePlatform(id) {
 
 
 
+
+/** 全库校验/补齐游戏信息（中文名、英文名、发行日期）；force=true 时不一致直接覆盖 */
+export function backfillGameMeta(force = false) {
+  return request.post('/admin/games/meta/backfill', null, { params: { force }, timeout: 300000 })
+}
+
+/** 全库补齐小黑盒链接（按 Steam appId 生成，无匹配过程，毫秒级） */
+export function backfillHeyboxLinks() {
+  return request.post('/admin/games/heybox-links/backfill', null, { timeout: 60000 })
+}

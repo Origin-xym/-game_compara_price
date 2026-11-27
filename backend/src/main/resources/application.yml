@@ -65,6 +65,20 @@ app:
       epic-enabled: true
       epic-timeout-ms: 8000
       epic-locale: en-US
+      # Epic 用「本机浏览器渲染」采集（GraphQL 端点被 Cloudflare 拦截，纯 HTTP 一律 403）
+      epic-browser-enabled: true
+      epic-browser-locale: zh-CN
+      epic-auto-link: true            # Steam 导入后自动搜 Epic 并挂链接（异步，命中才建）
+      meta-sync: true                 # 采集结束后异步校验/补全游戏的中文名、英文名、发行日期
+      # 小黑盒用浏览器渲染读游戏详情页价格（无对外价格接口），appId 即 Steam appId
+      heybox-enabled: true
+      heybox-interval-ms: 400
+      # 浏览器渲染参数：留空则自动探测 Edge/Chrome
+      browser:
+        browser-path: ""
+        port: 9333
+        profile-dir: ""
+        timeout-ms: 20000
 
 
 logging:

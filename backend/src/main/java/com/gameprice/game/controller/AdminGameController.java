@@ -2,11 +2,16 @@ package com.gameprice.game.controller;
 
 import com.gameprice.common.PageResult;
 import com.gameprice.common.Result;
+import com.gameprice.game.dto.EpicLinkResultVO;
+import com.gameprice.game.dto.GameMetaVO;
 import com.gameprice.game.dto.GameSaveRequest;
 import com.gameprice.game.dto.SteamImportRequest;
 import com.gameprice.game.dto.SteamSearchItemVO;
 import com.gameprice.game.entity.Game;
+import com.gameprice.game.service.EpicLinkService;
 import com.gameprice.game.service.GameImportService;
+import com.gameprice.game.service.GameMetaService;
+import com.gameprice.game.service.HeyboxLinkService;
 import com.gameprice.game.service.GameService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -34,6 +39,9 @@ public class AdminGameController {
 
     private final GameService gameService;
     private final GameImportService gameImportService;
+    private final EpicLinkService epicLinkService;
+    private final GameMetaService gameMetaService;
+    private final HeyboxLinkService heyboxLinkService;
 
     /** GET /api/admin/games?page=1&size=10&keyword=赛博 */
     @GetMapping
@@ -82,6 +90,38 @@ public class AdminGameController {
         return Result.ok(gameImportService.importFromSteam(request), "已从 Steam 导入");
     }
 
+    /**
+     * 批量为库里缺 Epic 链接的游戏补齐（浏览器搜 Epic 商店，命中才建链接）
+     * POST /api/admin/games/epic-links/backfill
+     *
+     * 注意：走本机浏览器渲染，一款约 3~5 秒，20 款大概 1~2 分钟，前端调用已放宽超时。
+     */
+    @PostMapping("/epic-links/backfill")
+    public Result<List<EpicLinkResultVO>> backfillEpicLinks() {
+        return Result.ok(epicLinkService.backfillAll(), "Epic 链接补齐完成");
+    }
+
+    /**
+     * 全库补齐小黑盒链接：小黑盒游戏页按 Steam appId 定位，无需搜索，纯本地拼 URL
+     * POST /api/admin/games/heybox-links/backfill
+     */
+    @PostMapping("/heybox-links/backfill")
+    public Result<List<EpicLinkResultVO>> backfillHeyboxLinks() {
+        return Result.ok(heyboxLinkService.backfillAll(), "小黑盒链接补齐完成");
+    }
+
+    /**
+     * 全库校验/补齐游戏基础信息（中文名、英文名、发行日期/年份），数据来自 Steam appdetails
+     * POST /api/admin/games/meta/backfill?force=false
+     *
+     * force=false：只补空字段，不一致只报告；force=true：不一致直接用 Steam 值覆盖
+     */
+    @PostMapping("/meta/backfill")
+    public Result<List<GameMetaVO>> backfillMeta(
+            @RequestParam(required = false, defaultValue = "false") Boolean force) {
+        return Result.ok(gameMetaService.backfillAll(Boolean.TRUE.equals(force)), "游戏信息校验完成");
+    }
+
     /** PUT /api/admin/games/{id} */
     @PutMapping("/{id}")
     /**
@@ -113,3 +153,4 @@ public class AdminGameController {
         return Result.<Void>ok(null,status == 0 ? "已下架" : "已上架");
     }
 }
+

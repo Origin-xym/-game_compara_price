@@ -44,9 +44,14 @@ public class CollectServiceImpl implements CollectService {
     private final CollectTaskLogMapper collectTaskLogMapper;
     private final CollectPriceWriter collectPriceWriter;
     private final SourceRegistry sourceRegistry;    // Spring 注入全部采集源实现
+    private final com.gameprice.game.service.GameMetaService gameMetaService;   // 采集后顺带补全游戏信息
 
     @Value("${app.collect.volatility-threshold:0.5}")
     private BigDecimal volatilityThreshold;
+
+    /** 采集结束后是否异步补全游戏信息（中文名/英文名/发行日期），失败不影响采集 */
+    @Value("${app.collect.meta-sync:true}")
+    private boolean metaSync;
 
     @Override
     public CollectResultVO run(Long platformId, String scenario) {
@@ -107,10 +112,14 @@ public class CollectServiceImpl implements CollectService {
         try {
             List<CollectItem> items = source.fetch(platform, scenario);
             total = items.size();
+            List<Long> collectedGameIds = new ArrayList<>();
             for (CollectItem item : items) {
                 try {
                     int result = collectPriceWriter.write(
                             item, platform, batchNo, source.sourceType(), volatilityThreshold);
+                    if (item.getGameId() != null) {
+                        collectedGameIds.add(item.getGameId());   // 同价跳过也算“采集过”，信息补全不受去重影响
+                    }
                     if (result == 0) {
                         skip++;
                     } else if (result == 2) {
@@ -126,6 +135,11 @@ public class CollectServiceImpl implements CollectService {
                 }
             }
             status = total == 0 ? 3 : (fail == 0 ? 1 : 2);
+            // 采集完顺手校验/补全游戏基础信息（异步，失败只记 debug 日志）
+            if (metaSync && !collectedGameIds.isEmpty()) {
+                List<Long> ids = List.copyOf(collectedGameIds);
+                java.util.concurrent.CompletableFuture.runAsync(() -> gameMetaService.syncMissing(ids));
+            }
             if (total == 0) {
                 errorMsg = "本批次未取到任何价格（检查网络/证书/币种，详见日志）";
             } else if (success == 0 && fail == 0 && skip > 0) {

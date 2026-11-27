@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'  // 从Vue中引入reactive、ref和onMounted等响应式API
 import { ElMessage, ElMessageBox } from 'element-plus'  // 从Element Plus引入消息提示和消息框组件
-import { adminListGames, createGame, updateGame, changeGameStatus, searchSteamGames, importSteamGame } from '@/api/admin'  // 从admin API模块引入游戏管理相关接口
+import { adminListGames, createGame, updateGame, changeGameStatus, searchSteamGames, importSteamGame, backfillEpicLinks, backfillGameMeta, backfillHeyboxLinks } from '@/api/admin'  // 从admin API模块引入游戏管理相关接口
 import { listGameTypes } from '@/api/meta'  // 从meta API模块引入游戏类型列表接口
 import { useUserStore } from '@/stores/user'  // 引入用户状态管理store
 // 从 @/api/admin 模块中导入 adminListLinks 和 saveLink 两个函数
@@ -239,6 +239,11 @@ const importResults = ref([])         // 候选列表
 const importingAppId = ref(null)      // 正在导入的 appId
 const importTypeId = ref(null)        // 手动指定类型；为空则用候选项推荐类型
 
+/* ---------- 批量补齐 Epic 链接 ---------- */
+const epicLoading = ref(false)        // 补齐中（走浏览器，较慢）
+const epicResults = ref([])           // 补齐结果逐条明细
+const epicResultVisible = ref(false)  // 结果弹窗
+
 /** 打开导入弹窗 */
 function openImport() {
   importVisible.value = true
@@ -283,8 +288,78 @@ async function doImport(candidate) {
 }
 
 /**
+ * 批量补齐 Epic 链接
+ * 后端逐款用本机浏览器搜 Epic 商店，命中才建链接；没上架的游戏会在结果弹窗里列出来
+ */
+async function doBackfillEpic() {
+  epicLoading.value = true
+  try {
+    const list = (await backfillEpicLinks()) || []
+    epicResults.value = list
+    epicResultVisible.value = true
+    const added = list.filter(r => r.status === 'NEW').length
+    const exists = list.filter(r => r.status === 'EXISTS').length
+    const notFound = list.filter(r => r.status === 'NOT_FOUND').length
+    ElMessage.success(`Epic 补齐完成：新增 ${added} 条 · 已有 ${exists} 条 · 未上架 ${notFound} 条`)
+    fetchList()
+  } finally {
+    epicLoading.value = false
+  }
+}
+
+/* ---------- 批量补齐小黑盒链接（不用浏览器，按 Steam appId 直接拼 URL） ---------- */
+const heyboxLoading = ref(false)
+const heyboxResults = ref([])
+const heyboxResultVisible = ref(false)
+
+/**
+ * 一块补齐小黑盒链接
+ * 小黑盒游戏页 URL = https://www.xiaoheihe.cn/app/topic/game/pc/{Steam appId}
+ */
+async function doBackfillHeybox() {
+  heyboxLoading.value = true
+  try {
+    const list = (await backfillHeyboxLinks()) || []
+    heyboxResults.value = list
+    heyboxResultVisible.value = true
+    const added = list.filter(r => r.status === 'NEW').length
+    const exists = list.filter(r => r.status === 'EXISTS').length
+    const noSteam = list.filter(r => r.status === 'NOT_FOUND').length
+    ElMessage.success(`小黑盒补齐完成：新增 ${added} 条 · 已有 ${exists} 条 · 无 Steam 链接 ${noSteam} 条`)
+    fetchList()
+  } finally {
+    heyboxLoading.value = false
+  }
+}
+
+/* ---------- 批量校验/补齐游戏信息（中文名、英文名、发行日期） ---------- */
+const metaLoading = ref(false)
+const metaForce = ref(false)          // 勾选后：与 Steam 不一致时直接覆盖
+const metaResults = ref([])
+const metaResultVisible = ref(false)
+
+/**
+ * 全库校验游戏信息
+ * 后端逐款调 Steam appdetails：空字段自动补，不一致只报告（勾选「强制覆盖」才改写）
+ */
+async function doBackfillMeta() {
+  metaLoading.value = true
+  try {
+    const list = (await backfillGameMeta(metaForce.value)) || []
+    metaResults.value = list
+    metaResultVisible.value = true
+    const filled = list.filter(r => r.status === 'FILLED').length
+    const mismatch = list.filter(r => r.status === 'MISMATCH').length
+    const noSteam = list.filter(r => r.status === 'NO_STEAM').length
+    ElMessage.success(`校验完成：补齐 ${filled} 款 · 不一致 ${mismatch} 款 · 无 Steam 链接 ${noSteam} 款`)
+    fetchList()
+  } finally {
+    metaLoading.value = false
+  }
+}
+
+/**
  * 组件挂载时的生命周期钩子
- * 非管理员用户直接返回，不执行后续操作
  * 初始化列表数据和游戏类型数据
  */
 onMounted(async () => {
@@ -325,6 +400,9 @@ onMounted(async () => {
         <div class="spacer"></div>
       <!-- 新增游戏按钮 -->
         <el-button type="success" @click="openImport">Steam 搜索导入</el-button>
+        <el-button type="warning" :loading="epicLoading" @click="doBackfillEpic">补齐 Epic 链接</el-button>
+        <el-button type="warning" plain :loading="heyboxLoading" @click="doBackfillHeybox">补齐小黑盒链接</el-button>
+        <el-button type="info" :loading="metaLoading" @click="doBackfillMeta">校验游戏信息</el-button>
         <el-button type="primary" @click="openCreate">新增游戏</el-button>
       </div>
 
@@ -443,8 +521,96 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-  <!-- 新增/编辑游戏对话框 -->
-    <el-dialog
+    <!-- 补齐 Epic 链接结果 -->
+    <el-dialog v-model="epicResultVisible" title="Epic 链接补齐结果" width="720px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="规则：用本机浏览器搜 Epic 商店，标题与游戏同名才建链接；没搜到的通常是 Epic 未上架或国区不发售。" />
+      <el-table :data="epicResults" border stripe size="small" style="margin-top: 12px" max-height="420">
+        <el-table-column prop="gameName" label="游戏" min-width="150" show-overflow-tooltip />
+        <el-table-column label="结果" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'NEW'" type="success">已新增</el-tag>
+            <el-tag v-else-if="row.status === 'EXISTS'" type="info">已有链接</el-tag>
+            <el-tag v-else-if="row.status === 'NOT_FOUND'" type="warning">未上架</el-tag>
+            <el-tag v-else type="danger">失败</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="slug" label="Epic slug" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="epicTitle" label="Epic 商品标题" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="message" label="说明" min-width="200" show-overflow-tooltip />
+      </el-table>
+      <template #footer>
+        <el-button @click="epicResultVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 补齐小黑盒链接结果 -->
+    <el-dialog v-model="heyboxResultVisible" title="小黑盒链接补齐结果" width="720px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="小黑盒游戏页按 Steam appId 定位（/app/topic/game/pc/{appId}），有 Steam 链接的游戏基本都能挂上；没有 Steam 链接的挂不了。" />
+      <el-table :data="heyboxResults" border stripe size="small" style="margin-top: 12px" max-height="420">
+        <el-table-column prop="gameName" label="游戏" min-width="170" show-overflow-tooltip />
+        <el-table-column label="结果" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'NEW'" type="success">已新增</el-tag>
+            <el-tag v-else-if="row.status === 'EXISTS'" type="info">已有链接</el-tag>
+            <el-tag v-else-if="row.status === 'NOT_FOUND'" type="warning">无 Steam</el-tag>
+            <el-tag v-else type="danger">失败</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="slug" label="Steam appId" width="120" />
+        <el-table-column prop="message" label="说明" min-width="220" show-overflow-tooltip />
+      </el-table>
+      <template #footer>
+        <el-button @click="heyboxResultVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 校验/补齐游戏信息结果 -->
+    <el-dialog v-model="metaResultVisible" title="游戏信息校验结果" width="820px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="规则：空字段用 Steam 值补齐；已有值与 Steam 不一致时只报告不改写，勾选「强制覆盖」后才会按 Steam 值改写。" />
+      <el-checkbox v-model="metaForce" style="margin: 10px 0">强制覆盖不一致的字段（谨慎：会改掉手工修正的名称）</el-checkbox>
+      <el-table :data="metaResults" border stripe size="small" style="margin-top: 8px" max-height="420">
+        <el-table-column prop="name" label="游戏" min-width="150" show-overflow-tooltip />
+        <el-table-column label="结果" width="105">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'OK'" type="success">一致</el-tag>
+            <el-tag v-else-if="row.status === 'FILLED'" type="primary">已补齐</el-tag>
+            <el-tag v-else-if="row.status === 'MISMATCH'" type="warning">不一致</el-tag>
+            <el-tag v-else-if="row.status === 'NO_STEAM'" type="info">无 Steam</el-tag>
+            <el-tag v-else type="danger">失败</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="英文名" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ row.nameEn || '—' }}</span>
+            <span v-if="row.steamNameEn && row.steamNameEn !== row.nameEn" style="color: #e6a23c"> / Steam：{{ row.steamNameEn }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="发行日期" width="185" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ row.releaseDate || (row.releaseYear || '—') }}</span>
+            <span v-if="row.steamReleaseDate" style="color: #909399"> / {{ row.steamReleaseDate }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="message" label="说明" min-width="240" show-overflow-tooltip />
+      </el-table>
+      <template #footer>
+        <el-button @click="metaResultVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+  <!-- 新增/编辑游戏对话框 -->    <el-dialog
       v-model="dialogVisible"
       :title="editingId ? '编辑游戏' : '新增游戏'"
       width="520px">
@@ -579,3 +745,4 @@ onMounted(async () => {
 .imp-footer-label { font-size: 13px; color: #606266; }
 
 </style>
+

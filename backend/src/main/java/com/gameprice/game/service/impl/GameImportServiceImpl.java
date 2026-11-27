@@ -14,11 +14,14 @@ import com.gameprice.game.entity.GameType;
 import com.gameprice.game.mapper.GameMapper;
 import com.gameprice.game.mapper.GamePlatformMapper;
 import com.gameprice.game.mapper.GameTypeMapper;
+import com.gameprice.game.service.EpicLinkService;
+import com.gameprice.game.service.HeyboxLinkService;
 import com.gameprice.game.service.GameImportService;
 import com.gameprice.platform.entity.Platform;
 import com.gameprice.platform.mapper.PlatformMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +41,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -72,11 +76,17 @@ public class GameImportServiceImpl implements GameImportService {
     private final GameTypeMapper gameTypeMapper;
     private final PlatformMapper platformMapper;
     private final AuditLogService auditLogService;
+    private final EpicLinkService epicLinkService;
+    private final HeyboxLinkService heyboxLinkService;
     private final ObjectMapper objectMapper;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
+
+    /** 导入后是否自动尝试挂 Epic 链接（浏览器搜索，异步执行） */
+    @Value("${app.collect.epic-auto-link:true}")
+    private boolean epicAutoLink;
 
     // ------------------------------------------------------------------ 搜索
 
@@ -242,6 +252,24 @@ public class GameImportServiceImpl implements GameImportService {
         auditLogService.record("GAME", "LINK_UPDATE", game.getId(),
                 "game=" + game.getId() + " platform=" + platform.getCode() + "/" + platform.getRegion(),
                 before, after);
+
+        // 顺手挂小黑盒：小黑盒游戏页就是 Steam appId，纯本地拼 URL，无网络开销，直接同步建
+        try {
+            heyboxLinkService.ensureLink(game.getId());
+        } catch (Exception e) {
+            log.warn("导入后自动挂小黑盒失败 gameId={}：{}", game.getId(), e.getMessage());
+        }
+
+        // 顺手挂 Epic：用本机浏览器搜 Epic 商店，命中才建链接；后台异步执行，不拖慢导入响应
+        if (epicAutoLink) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    epicLinkService.ensureLink(game.getId());
+                } catch (Exception e) {
+                    log.warn("导入后自动挂 Epic 失败 gameId={}：{}", game.getId(), e.getMessage());
+                }
+            });
+        }
 
         log.info("Steam 导入成功：appId={} → gameId={} name={} platform={}/{}",
                 appId, game.getId(), name, platform.getCode(), platform.getRegion());
@@ -422,3 +450,4 @@ public class GameImportServiceImpl implements GameImportService {
         }
     }
 }
+

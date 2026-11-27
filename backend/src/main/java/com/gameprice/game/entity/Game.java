@@ -1,11 +1,14 @@
 package com.gameprice.game.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.gameprice.common.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+
+import java.util.List;
 
 /**
  * 游戏实体类，继承自BaseEntity
@@ -50,4 +53,11 @@ public class Game extends BaseEntity {
     private Integer status;
 
     private Integer sortWeight;
+
+    /**
+     * 该游戏的全部类型 id（多标签）。
+     * 非数据库字段：由 Service 查 game_type_rel 后填充，供后台列表展示/回填表单。
+     */
+    @TableField(exist = false)
+    private List<Long> gameTypeIds;
 }

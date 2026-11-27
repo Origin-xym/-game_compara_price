@@ -171,7 +171,11 @@ watch(() => route.params.id, (id) => {
           <p class="sub">{{ detail.nameEn }}</p> <!-- 游戏英文名 -->
         <!-- 游戏标签展示 -->
           <div class="tags">
-            <el-tag v-if="detail.gameTypeName" type="info">{{ detail.gameTypeName }}</el-tag>
+            <el-tag
+              v-for="t in (detail.gameTypeNames && detail.gameTypeNames.length ? detail.gameTypeNames : (detail.gameTypeName ? [detail.gameTypeName] : []))"
+              :key="t"
+              type="info"
+              style="margin-right: 4px">{{ t }}</el-tag>
             <el-tag v-if="detail.releaseYear">{{ detail.releaseYear }} 年</el-tag>
             <el-tag v-if="detail.platformCount">{{ detail.platformCount }} 个平台有价</el-tag>
           </div>

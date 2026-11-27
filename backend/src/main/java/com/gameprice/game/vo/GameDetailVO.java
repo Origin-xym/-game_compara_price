@@ -30,6 +30,10 @@ public class GameDetailVO {
     private String summary;       // 游戏简介描述
     private Long gameTypeId;      // 游戏类型ID
     private String gameTypeName;  // 游戏类型名称
+
+    /** 多标签：全部类型 id / 名称 */
+    private List<Long> gameTypeIds;
+    private List<String> gameTypeNames;
     private Integer releaseYear;  // 游戏发布年份
 
     /** 详情最低人民币价，与列表起价同源（AC-14.1） */

@@ -3,6 +3,8 @@ package com.gameprice.game.dto;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * 后台新增/编辑游戏。
  * 必填清单按最小可用集：名称 + 类型（Q14 定了再扩）。
@@ -23,7 +25,11 @@ public class GameSaveRequest {
     @Size(max = 1000, message = "简介最长 1000 字符")  // 限制游戏简介最大长度为1000字符
     private String summary;  // 游戏简介字段
 
-    @NotNull(message = "游戏类型不能为空")  // 确保游戏类型必须选择，不能为null
+    /** 多标签（推荐用这个，可多个）；为空时回落到 gameTypeId */
+    @Size(max = 10, message = "一个游戏最多 10 个标签")
+    private List<Long> typeIds;
+
+    /** 单标签兼容字段 */
     private Long gameTypeId;  // 游戏类型ID字段
 
     @Min(value = 1970, message = "发行年份不合法")  // 限制最小发行年份为1970年
@@ -32,3 +38,4 @@ public class GameSaveRequest {
 
     private Integer sortWeight;  // 游戏排序权重字段，用于控制显示顺序
 }
+

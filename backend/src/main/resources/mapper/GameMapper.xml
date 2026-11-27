@@ -48,17 +48,32 @@
                 <foreach collection="q.keywordTypeIds" item="tid" open="(" separator="," close=")">
                     #{tid}
                 </foreach>
+                OR EXISTS (
+                    SELECT 1 FROM game_type_rel rk
+                    WHERE rk.game_id = g.id AND rk.type_id IN
+                    <foreach collection="q.keywordTypeIds" item="tid" open="(" separator="," close=")">
+                        #{tid}
+                    </foreach>
+                )
             </if>
             )
         </if>
 
-        <!-- AC-3.1 类型筛选（多选 AND 叠加） -->
+        <!-- AC-3.1 类型筛选（多选 AND 叠加；一个游戏可挂多个标签，命中任意一个即算匹配） -->
         <if test="q.typeIds != null and q.typeIds.size() > 0">
-        <!-- 根据游戏类型ID筛选 -->
-            AND g.game_type_id IN
-            <foreach collection="q.typeIds" item="tid" open="(" separator="," close=")">
-                #{tid}
-            </foreach>
+            AND (
+                g.game_type_id IN
+                <foreach collection="q.typeIds" item="tid" open="(" separator="," close=")">
+                    #{tid}
+                </foreach>
+                OR EXISTS (
+                    SELECT 1 FROM game_type_rel r
+                    WHERE r.game_id = g.id AND r.type_id IN
+                    <foreach collection="q.typeIds" item="tid" open="(" separator="," close=")">
+                        #{tid}
+                    </foreach>
+                )
+            )
         </if>
 
         <!-- AC-3.1 平台筛选：该游戏在该平台有当前价 -->

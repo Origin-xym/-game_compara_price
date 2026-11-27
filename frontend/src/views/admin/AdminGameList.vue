@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'  // 从Vue中引入reactive、ref和onMounted等响应式API
 import { ElMessage, ElMessageBox } from 'element-plus'  // 从Element Plus引入消息提示和消息框组件
-import { adminListGames, createGame, updateGame, changeGameStatus, searchSteamGames, importSteamGame, backfillEpicLinks, backfillGameMeta, backfillHeyboxLinks } from '@/api/admin'  // 从admin API模块引入游戏管理相关接口
+import { adminListGames, createGame, updateGame, changeGameStatus, searchSteamGames, importSteamGame, backfillEpicLinks, backfillGameMeta, backfillHeyboxLinks, adminListGameTypes, createGameType, updateGameType, deleteGameType } from '@/api/admin'  // 从admin API模块引入游戏管理相关接口
 import { listGameTypes } from '@/api/meta'  // 从meta API模块引入游戏类型列表接口
 import { useUserStore } from '@/stores/user'  // 引入用户状态管理store
 // 从 @/api/admin 模块中导入 adminListLinks 和 saveLink 两个函数
@@ -36,7 +36,8 @@ const form = reactive({
   nameEn: '',            // 游戏英文名称
   coverUrl: '',          // 游戏封面图片URL
   summary: '',           // 游戏简介
-  gameTypeId: null,      // 游戏类型ID
+  typeIds: [],           // 游戏标签（多选）
+  gameTypeId: null,      // 兼容：主类型 = typeIds[0]
   releaseYear: null,     // 发布年份
   sortWeight: 0          // 排序权重
 })
@@ -80,6 +81,7 @@ function openCreate() {
   // 重置表单数据，设置默认值
   Object.assign(form, {
     name: '', nameEn: '', coverUrl: '', summary: '',
+    typeIds: types.value[0] ? [types.value[0].id] : [],
     gameTypeId: types.value[0]?.id ?? null, releaseYear: null, sortWeight: 0
   })
   dialogVisible.value = true
@@ -100,7 +102,8 @@ function openEdit(row) {
     nameEn: row.nameEn,       // 游戏英文名称
     coverUrl: row.coverUrl,   // 游戏封面图片URL
     summary: row.summary,     // 游戏简介
-    gameTypeId: row.gameTypeId, // 游戏类型ID
+    typeIds: row.gameTypeIds && row.gameTypeIds.length ? [...row.gameTypeIds] : (row.gameTypeId ? [row.gameTypeId] : []),
+    gameTypeId: row.gameTypeId, // 兼容字段
     releaseYear: row.releaseYear, // 游戏发行年份
     sortWeight: row.sortWeight    // 游戏排序权重
   })
@@ -114,6 +117,12 @@ function openEdit(row) {
  * 处理保存过程中的错误和状态更新
  */
 async function submit() {
+  // 多标签至少要选一个
+  if (!form.typeIds || form.typeIds.length === 0) {
+    fieldErrors.value = { typeIds: '至少选择一个标签' }
+    ElMessage.warning('至少选择一个标签')
+    return
+  }
   // 设置保存状态为true，表示正在保存
   saving.value = true
   // 清空字段错误信息
@@ -121,6 +130,9 @@ async function submit() {
   try {
     // 创建表单数据的副本，避免直接修改原始数据
     const payload = { ...form }
+    // 主类型 = 第一个标签（后端 game_type_id 兼容字段）
+    payload.gameTypeId = form.typeIds[0]
+    payload.typeIds = [...form.typeIds]
     // 检查是否存在编辑ID，判断是更新还是新增操作
     if (editingId.value) {
       // 如果存在编辑ID，则调用更新API
@@ -358,6 +370,87 @@ async function doBackfillMeta() {
   }
 }
 
+/* ---------- 类型（标签）管理 ---------- */
+const typeMgrVisible = ref(false)
+const typeRows = ref([])
+const typeSaving = ref(false)
+const typeForm = reactive({ id: null, code: '', name: '', sortNo: 99 })
+
+/** 标签 id → 名称（列表列展示用） */
+function typeName(id) {
+  const t = types.value.find((x) => x.id === id)
+  return t ? t.name : `#${id}`
+}
+
+/** 重新拉一遍前台类型字典（增删改后同步筛选下拉） */
+async function reloadTypes() {
+  types.value = (await listGameTypes()) || []
+}
+
+async function loadTypeRows() {
+  typeRows.value = (await adminListGameTypes()) || []
+}
+
+function openTypeMgr() {
+  resetTypeForm()
+  loadTypeRows()
+  typeMgrVisible.value = true
+}
+
+function resetTypeForm() {
+  typeForm.id = null
+  typeForm.code = ''
+  typeForm.name = ''
+  typeForm.sortNo = 99
+}
+
+function editTypeRow(row) {
+  typeForm.id = row.id
+  typeForm.code = row.code
+  typeForm.name = row.name
+  typeForm.sortNo = row.sortNo ?? 99
+}
+
+/** 新增或改名 */
+async function saveType() {
+  if (!typeForm.code.trim() || !typeForm.name.trim()) {
+    ElMessage.warning('编码和名称都要填')
+    return
+  }
+  typeSaving.value = true
+  try {
+    const payload = { code: typeForm.code.trim(), name: typeForm.name.trim(), sortNo: typeForm.sortNo }
+    if (typeForm.id) {
+      await updateGameType(typeForm.id, payload)
+      ElMessage.success('标签已更新')
+    } else {
+      await createGameType(payload)
+      ElMessage.success('标签已新增')
+    }
+    resetTypeForm()
+    await loadTypeRows()
+    await reloadTypes()
+  } finally {
+    typeSaving.value = false
+  }
+}
+
+/** 删除标签（仍有游戏在用会被后端拒绝） */
+async function removeType(row) {
+  try {
+    await ElMessageBox.confirm(
+      `删除标签「${row.name}」？仍有 ${row.usedCount ?? 0} 个游戏在用时会拒绝。`,
+      '删除标签',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+  } catch {
+    return
+  }
+  await deleteGameType(row.id)
+  ElMessage.success('已删除')
+  await loadTypeRows()
+  await reloadTypes()
+}
+
 /**
  * 组件挂载时的生命周期钩子
  * 初始化列表数据和游戏类型数据
@@ -404,6 +497,7 @@ onMounted(async () => {
         <el-button type="warning" plain :loading="heyboxLoading" @click="doBackfillHeybox">补齐小黑盒链接</el-button>
         <el-button type="info" :loading="metaLoading" @click="doBackfillMeta">校验游戏信息</el-button>
         <el-button type="primary" @click="openCreate">新增游戏</el-button>
+        <el-button @click="openTypeMgr">类型管理</el-button>
       </div>
 
     <!-- 游戏列表表格 -->
@@ -415,7 +509,18 @@ onMounted(async () => {
       <!-- 英文名称列 -->
         <el-table-column prop="nameEn" label="英文名" min-width="160" show-overflow-tooltip />
       <!-- 游戏类型ID列 -->
-        <el-table-column prop="gameTypeId" label="类型ID" width="90" />
+        <el-table-column label="标签" min-width="170">
+          <template #default="{ row }">
+            <el-tag
+              v-for="tid in (row.gameTypeIds && row.gameTypeIds.length ? row.gameTypeIds : (row.gameTypeId ? [row.gameTypeId] : []))"
+              :key="tid"
+              size="small"
+              type="info"
+              style="margin-right: 4px">
+              {{ typeName(tid) }}
+            </el-tag>
+          </template>
+        </el-table-column>
       <!-- 发行年份列 -->
         <el-table-column prop="releaseYear" label="年份" width="80" />
       <!-- 排序权重列 -->
@@ -610,6 +715,50 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
+    <!-- 类型（标签）管理 -->
+    <el-dialog v-model="typeMgrVisible" title="类型（标签）管理" width="680px">
+      <el-alert
+        title="一个游戏可以挂多个标签；删除仍被游戏使用的标签会被拒绝。"
+        type="info"
+        :closable="false"
+        show-icon />
+      <el-table :data="typeRows" border stripe size="small" style="margin-top: 12px" max-height="300">
+        <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column prop="code" label="编码" width="130" />
+        <el-table-column prop="name" label="名称" min-width="120" />
+        <el-table-column prop="sortNo" label="排序" width="70" />
+        <el-table-column prop="usedCount" label="在用游戏" width="90" />
+        <el-table-column label="操作" width="130">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="editTypeRow(row)">编辑</el-button>
+            <el-button link type="danger" @click="removeType(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-divider content-position="left">{{ typeForm.id ? '编辑标签' : '新增标签' }}</el-divider>
+      <el-form :inline="true" label-width="70px">
+        <el-form-item label="编码">
+          <el-input v-model="typeForm.code" placeholder="如 HORROR" style="width: 140px" />
+        </el-form-item>
+        <el-form-item label="名称">
+          <el-input v-model="typeForm.name" placeholder="如 恐怖" style="width: 140px" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="typeForm.sortNo" :min="1" :max="999" style="width: 120px" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="typeSaving" @click="saveType">
+            {{ typeForm.id ? '保存修改' : '新增' }}
+          </el-button>
+          <el-button v-if="typeForm.id" @click="resetTypeForm">取消编辑</el-button>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="typeMgrVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
   <!-- 新增/编辑游戏对话框 -->    <el-dialog
       v-model="dialogVisible"
       :title="editingId ? '编辑游戏' : '新增游戏'"
@@ -624,9 +773,15 @@ onMounted(async () => {
         <el-form-item label="英文名">
           <el-input v-model="form.nameEn" />
         </el-form-item>
-      <!-- 游戏类型表单项 -->
-        <el-form-item label="类型" required :error="fieldErrors.gameTypeId">
-          <el-select v-model="form.gameTypeId" placeholder="选择类型" style="width: 100%">
+      <!-- 游戏类型（标签）表单项：可多选 -->
+        <el-form-item label="标签" required :error="fieldErrors.typeIds">
+          <el-select
+            v-model="form.typeIds"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="可多选，至少一个"
+            style="width: 100%">
             <el-option v-for="t in types" :key="t.id" :label="t.name" :value="t.id" />
           </el-select>
         </el-form-item>
@@ -745,4 +900,6 @@ onMounted(async () => {
 .imp-footer-label { font-size: 13px; color: #606266; }
 
 </style>
+
+
 

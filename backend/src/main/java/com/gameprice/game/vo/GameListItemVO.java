@@ -20,6 +20,11 @@ public class GameListItemVO {
     private Long gameTypeId;
     private String gameTypeName;
 
+    /** 多标签：全部类型 id */
+    private List<Long> gameTypeIds;
+    /** 多标签：全部类型名称（按类型排序号） */
+    private List<String> gameTypeNames;
+
     /** 人民币起价（= 当前价最小值）；无报价时为 null */
     private BigDecimal minPriceCny;
 

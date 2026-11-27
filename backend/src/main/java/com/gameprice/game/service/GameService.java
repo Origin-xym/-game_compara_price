@@ -31,6 +31,20 @@ public interface GameService {
     /** 上下架（AC-11.3） */
     void changeStatus(Long id, Integer status);
 
+    /* ---------- 后台：游戏类型（标签）管理 ---------- */
+
+    /** 后台类型列表：带 sortNo 与使用数量 */
+    java.util.List<com.gameprice.game.vo.GameTypeVO> adminListTypes();
+
+    /** 新增类型（返回新 id） */
+    Long createType(com.gameprice.game.dto.GameTypeSaveRequest request);
+
+    /** 编辑类型 */
+    void updateType(Long id, com.gameprice.game.dto.GameTypeSaveRequest request);
+
+    /** 逻辑删除类型（仍有游戏在用则拒绝） */
+    void deleteType(Long id);
+
 
 
 

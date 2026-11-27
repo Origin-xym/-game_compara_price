@@ -9,11 +9,14 @@ import com.gameprice.common.ErrorCode;
 import com.gameprice.common.PageResult;
 import com.gameprice.game.dto.GameListQuery;
 import com.gameprice.game.dto.GameSaveRequest;
+import com.gameprice.game.dto.GameTypeSaveRequest;
 import com.gameprice.game.entity.Game;
 import com.gameprice.game.entity.GamePlatform;
 import com.gameprice.game.entity.GameType;
+import com.gameprice.game.entity.GameTypeRel;
 import com.gameprice.game.mapper.GameMapper;
 import com.gameprice.game.mapper.GameTypeMapper;
+import com.gameprice.game.mapper.GameTypeRelMapper;
 import com.gameprice.game.service.GameService;
 import com.gameprice.game.vo.GameListItemVO;
 import com.gameprice.game.vo.GameTypeVO;
@@ -50,6 +53,8 @@ public class GameServiceImpl implements GameService {
     private final GameMapper gameMapper;
     // 游戏类型数据访问层
     private final GameTypeMapper gameTypeMapper;
+    // 游戏-类型多标签关系
+    private final GameTypeRelMapper gameTypeRelMapper;
     // 价格记录数据访问层
     private final PriceRecordMapper priceRecordMapper;
     // 从配置文件中读取价格数据过期时间的小时数，如果未配置则默认为24小时
@@ -121,8 +126,8 @@ public class GameServiceImpl implements GameService {
         List<Long> gameIds = games.stream().map(Game::getId).collect(Collectors.toList());
 
         // 4. 批量补类型名与当前价（避免 N+1）
-        // 加载游戏类型名称映射表，键为游戏ID，值为类型名称
-        Map<Long, String> typeNameMap = loadTypeNames(games);
+        // 每个游戏的完整标签集合（多标签）
+        Map<Long, List<GameType>> typeMap = loadTypes(games);
         // 加载当前价格数据映射表，键为游戏ID，值为当前价格行列表
         Map<Long, List<CurrentPriceRow>> priceMap = loadCurrentPrices(gameIds);
 
@@ -135,7 +140,7 @@ public class GameServiceImpl implements GameService {
         for (Game g : games) {
             // 将游戏对象转换为GameListItemVO对象，并添加到items列表中
             // 转换时传入游戏对象、类型名称映射、价格映射（如果找不到对应价格则使用空列表）和当前时间
-            items.add(toItem(g, typeNameMap,
+            items.add(toItem(g, typeMap,
                     priceMap.getOrDefault(g.getId(), Collections.emptyList()), now));
         }
 
@@ -200,25 +205,47 @@ public class GameServiceImpl implements GameService {
     /* ---------------- 批量补充 ---------------- */
 
 /**
- * 从游戏列表中加载类型名称并构建ID到名称的映射关系
- * @param games 游戏列表
- * @return 返回一个Map，键为游戏类型ID，值为类型名称
+ * 批量加载每个游戏的全部标签（多标签），按类型排序号排好。
+ * 没有 rel 行的老数据回落到 game.game_type_id，保证兼容。
  */
-    private Map<Long, String> loadTypeNames(List<Game> games) {
-        // 从游戏列表中提取所有游戏类型ID，并过滤掉null值
-        Set<Long> typeIds = games.stream()
-                .map(Game::getGameTypeId)  // 提取游戏类型ID
-                .filter(Objects::nonNull)  // 过滤掉null值
-                .collect(Collectors.toSet());  // 收集到Set集合中
-        // 如果没有找到任何类型ID，返回空Map
-        if (typeIds.isEmpty()) {
+    private Map<Long, List<GameType>> loadTypes(List<Game> games) {
+        if (games == null || games.isEmpty()) {
             return Collections.emptyMap();
         }
-        // 根据类型ID列表查询对应的游戏类型信息
-        List<GameType> types = gameTypeMapper.selectList(
-                new LambdaQueryWrapper<GameType>().in(GameType::getId, typeIds));
-        // 将查询到的游戏类型列表转换为ID到名称的Map
-        return types.stream().collect(Collectors.toMap(GameType::getId, GameType::getName));
+        List<Long> gameIds = games.stream().map(Game::getId).collect(Collectors.toList());
+        List<GameTypeRel> rels = gameTypeRelMapper.selectList(
+                new LambdaQueryWrapper<GameTypeRel>().in(GameTypeRel::getGameId, gameIds));
+
+        Set<Long> allTypeIds = new LinkedHashSet<>();
+        rels.forEach(r -> { if (r.getTypeId() != null) allTypeIds.add(r.getTypeId()); });
+        games.forEach(g -> { if (g.getGameTypeId() != null) allTypeIds.add(g.getGameTypeId()); });
+        if (allTypeIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<Long, GameType> typeById = gameTypeMapper.selectList(
+                        new LambdaQueryWrapper<GameType>().in(GameType::getId, allTypeIds))
+                .stream().collect(Collectors.toMap(GameType::getId, t -> t));
+
+        Map<Long, List<Long>> idsByGame = new HashMap<>();
+        for (GameTypeRel r : rels) {
+            idsByGame.computeIfAbsent(r.getGameId(), k -> new ArrayList<>()).add(r.getTypeId());
+        }
+
+        Map<Long, List<GameType>> result = new HashMap<>();
+        for (Game g : games) {
+            List<Long> ids = idsByGame.get(g.getId());
+            if (ids == null || ids.isEmpty()) {
+                ids = g.getGameTypeId() == null ? List.of() : List.of(g.getGameTypeId());
+            }
+            List<GameType> list = ids.stream()
+                    .map(typeById::get)
+                    .filter(Objects::nonNull)
+                    .sorted(Comparator.comparing(t -> t.getSortNo() == null ? 999 : t.getSortNo()))
+                    .collect(Collectors.toList());
+            result.put(g.getId(), list);
+        }
+        return result;
     }
 
 /**
@@ -246,7 +273,7 @@ public class GameServiceImpl implements GameService {
  * @param prices 当前价格列表
  * @return 转换后的游戏列表项视图对象
  */
-    private GameListItemVO toItem(Game g, Map<Long, String> typeNameMap, List<CurrentPriceRow> prices,LocalDateTime now) {
+    private GameListItemVO toItem(Game g, Map<Long, List<GameType>> typeMap, List<CurrentPriceRow> prices,LocalDateTime now) {
         // 创建游戏列表项视图对象
         GameListItemVO vo = new GameListItemVO();
         // 设置游戏基本信息
@@ -254,8 +281,11 @@ public class GameServiceImpl implements GameService {
         vo.setName(g.getName());                // 设置游戏中文名称
         vo.setNameEn(g.getNameEn());            // 设置游戏英文名称
         vo.setCoverUrl(g.getCoverUrl());        // 设置游戏封面URL
-        vo.setGameTypeId(g.getGameTypeId());    // 设置游戏类型ID
-        vo.setGameTypeName(typeNameMap.get(g.getGameTypeId()));  // 设置游戏类型名称
+        vo.setGameTypeId(g.getGameTypeId());    // 主类型（兼容旧字段）
+        List<GameType> typeList = typeMap.getOrDefault(g.getId(), Collections.emptyList());
+        vo.setGameTypeName(typeList.isEmpty() ? null : typeList.get(0).getName());
+        vo.setGameTypeIds(typeList.stream().map(GameType::getId).collect(Collectors.toList()));
+        vo.setGameTypeNames(typeList.stream().map(GameType::getName).collect(Collectors.toList()));
 
         // 检查是否有报价数据
         if (prices.isEmpty()) {
@@ -319,8 +349,9 @@ public class GameServiceImpl implements GameService {
             throw new BizException(ErrorCode.GAME_NOT_FOUND);
         }
 
-        // 根据游戏类型ID查询游戏类型信息，如果游戏类型ID为null，则type为null
-        GameType type = game.getGameTypeId() == null ? null : gameTypeMapper.selectById(game.getGameTypeId());
+        // 该游戏的全部标签（多标签；无 rel 时回落到 game_type_id）
+        List<GameType> typeList = loadTypes(Collections.singletonList(game))
+                .getOrDefault(gameId, Collections.emptyList());
 
         // 与列表完全同一段查询，保证「详情最低 == 列表起价」（AC-14.1）
         // 查询指定游戏的当前价格记录列表
@@ -337,9 +368,10 @@ public class GameServiceImpl implements GameService {
         vo.setNameEn(game.getNameEn());      // 设置游戏英文名称
         vo.setCoverUrl(game.getCoverUrl());  // 设置游戏封面图片URL
         vo.setSummary(game.getSummary());     // 设置游戏简介
-        vo.setGameTypeId(game.getGameTypeId()); // 设置游戏类型ID
-        // 设置游戏类型信息，如果type为null则设置为null，否则设置为type的名称
-        vo.setGameTypeName(type == null ? null : type.getName());
+        vo.setGameTypeId(game.getGameTypeId()); // 主类型（兼容）
+        vo.setGameTypeName(typeList.isEmpty() ? null : typeList.get(0).getName());
+        vo.setGameTypeIds(typeList.stream().map(GameType::getId).collect(Collectors.toList()));
+        vo.setGameTypeNames(typeList.stream().map(GameType::getName).collect(Collectors.toList()));
         // 设置游戏发行年份
         vo.setReleaseYear(game.getReleaseYear());
 
@@ -659,6 +691,7 @@ public class GameServiceImpl implements GameService {
             vo.setId(t.getId());    // 设置ID
             vo.setCode(t.getCode()); // 设置编码
             vo.setName(t.getName()); // 设置名称
+            vo.setSortNo(t.getSortNo()); // 排序号（前台筛选项按此排序）
             return vo;             // 返回转换后的视图对象
         }).collect(Collectors.toList());  // 收集结果为列表并返回
     }
@@ -687,8 +720,69 @@ public class GameServiceImpl implements GameService {
         }
         // 执行分页查询
         Page<Game> result = gameMapper.selectPage(p, wrapper);
+        // 补每条记录的多标签 id，供后台列表展示 / 编辑回填
+        fillGameTypeIds(result.getRecords());
         // 返回格式化的分页结果
         return PageResult.of(result.getTotal(), page, size, result.getRecords());
+    }
+
+    /** 给一批 Game 填充 gameTypeIds（多标签） */
+    private void fillGameTypeIds(List<Game> games) {
+        if (games == null || games.isEmpty()) {
+            return;
+        }
+        List<Long> ids = games.stream().map(Game::getId).collect(Collectors.toList());
+        List<GameTypeRel> rels = gameTypeRelMapper.selectList(
+                new LambdaQueryWrapper<GameTypeRel>().in(GameTypeRel::getGameId, ids));
+        Map<Long, List<Long>> byGame = new HashMap<>();
+        for (GameTypeRel r : rels) {
+            byGame.computeIfAbsent(r.getGameId(), k -> new ArrayList<>()).add(r.getTypeId());
+        }
+        for (Game g : games) {
+            List<Long> list = byGame.get(g.getId());
+            if (list == null || list.isEmpty()) {
+                list = g.getGameTypeId() == null ? new ArrayList<>() : new ArrayList<>(List.of(g.getGameTypeId()));
+            }
+            g.setGameTypeIds(list);
+        }
+    }
+
+    /** 解析并校验请求里的标签集合（typeIds 优先，回落 gameTypeId），至少一个 */
+    private List<Long> resolveTypeIds(GameSaveRequest request) {
+        List<Long> raw = request.getTypeIds();
+        if (raw == null || raw.isEmpty()) {
+            raw = request.getGameTypeId() == null ? List.of() : List.of(request.getGameTypeId());
+        }
+        // 去空、去重，保持顺序
+        java.util.LinkedHashSet<Long> cleaned = new java.util.LinkedHashSet<>();
+        for (Long id : raw) {
+            if (id != null) {
+                cleaned.add(id);
+            }
+        }
+        if (cleaned.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "至少选择一个游戏类型（标签）",
+                    Map.of("typeIds", "至少选择一个标签"));
+        }
+        for (Long id : cleaned) {
+            if (gameTypeMapper.selectById(id) == null) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "游戏类型不存在：id=" + id,
+                        Map.of("typeIds", "存在不存在的类型"));
+            }
+        }
+        return new ArrayList<>(cleaned);
+    }
+
+    /** 全量重写某游戏的标签关系（先删后插） */
+    private void saveTypeRels(Long gameId, List<Long> typeIds) {
+        gameTypeRelMapper.delete(new LambdaQueryWrapper<GameTypeRel>()
+                .eq(GameTypeRel::getGameId, gameId));
+        for (Long typeId : typeIds) {
+            GameTypeRel rel = new GameTypeRel();
+            rel.setGameId(gameId);
+            rel.setTypeId(typeId);
+            gameTypeRelMapper.insert(rel);
+        }
     }
 
     @Override
@@ -711,8 +805,8 @@ public class GameServiceImpl implements GameService {
             throw new BizException(ErrorCode.DUPLICATE_GAME, "该游戏已存在",
                     Map.of("name", "该游戏已存在"));
         }
-        // 验证游戏类型是否存在
-        assertTypeExists(request.getGameTypeId());
+        // 校验并解析标签（多标签；至少一个）
+        List<Long> typeIds = resolveTypeIds(request);
 
         // 创建新的游戏对象
         Game game = new Game();
@@ -721,7 +815,7 @@ public class GameServiceImpl implements GameService {
         game.setNameEn(blankToNull(request.getNameEn())); // 英文名称，空值转为null
         game.setCoverUrl(blankToNull(request.getCoverUrl())); // 封面图片URL，空值转为null
         game.setSummary(blankToNull(request.getSummary())); // 游戏简介，空值转为null
-        game.setGameTypeId(request.getGameTypeId()); // 游戏类型ID
+        game.setGameTypeId(typeIds.get(0)); // 主类型 = 第一个标签（兼容旧字段）
         game.setReleaseYear(request.getReleaseYear()); // 发行年份
         game.setStatus(1); // 设置状态为1（可能表示激活状态）
         // 设置排序权重，如果为null则默认为0
@@ -729,6 +823,9 @@ public class GameServiceImpl implements GameService {
 
         // 将游戏信息插入数据库
         gameMapper.insert(game);
+        // 写多标签关系
+        saveTypeRels(game.getId(), typeIds);
+        game.setGameTypeIds(typeIds);
         // 记录创建游戏的审计日志
         auditLogService.record("GAME", "CREATE", game.getId(), game.getName(), null, game);
         // 返回新创建的游戏ID
@@ -763,8 +860,8 @@ public class GameServiceImpl implements GameService {
                         Map.of("name", "该游戏已存在"));
             }
         }
-        // 验证游戏类型是否存在
-        assertTypeExists(request.getGameTypeId());
+        // 校验并解析标签（多标签）
+        List<Long> typeIds = resolveTypeIds(request);
 
         // AC-11.2：只改 game 表，价格历史 / 收藏 / 提醒 一律不碰
         // 使用MyBatis-Plus的LambdaUpdateWrapper更新游戏信息
@@ -780,16 +877,109 @@ public class GameServiceImpl implements GameService {
                 .set(Game::getCoverUrl, blankToNull(request.getCoverUrl()))
                 // 设置游戏简介，如果传入的summary为空字符串则转换为null
                 .set(Game::getSummary, blankToNull(request.getSummary()))
-                // 设置游戏类型ID
-                .set(Game::getGameTypeId, request.getGameTypeId())
+                // 主类型 = 第一个标签（兼容旧字段）
+                .set(Game::getGameTypeId, typeIds.get(0))
                 // 设置发布年份
                 .set(Game::getReleaseYear, request.getReleaseYear())
                 // 设置排序权重，如果传入的sortWeight为null则默认设为0
                 .set(Game::getSortWeight, request.getSortWeight() == null ? 0 : request.getSortWeight()));
 
+        // 写多标签关系
+        saveTypeRels(id, typeIds);
+
         // 记录游戏更新的审计日志
         // 参数分别为：模块名(GAME)、操作类型(UPDATE)、游戏ID、游戏名称、旧数据、更新后的数据
         auditLogService.record("GAME", "UPDATE", id, name, old, gameMapper.selectById(id));
+    }
+
+    /* ================= 后台：类型（标签）管理 ================= */
+
+    @Override
+    public List<GameTypeVO> adminListTypes() {
+        List<GameType> types = gameTypeMapper.selectList(new LambdaQueryWrapper<GameType>()
+                .orderByAsc(GameType::getSortNo)
+                .orderByAsc(GameType::getId));
+        return types.stream().map(t -> {
+            GameTypeVO vo = new GameTypeVO();
+            vo.setId(t.getId());
+            vo.setCode(t.getCode());
+            vo.setName(t.getName());
+            vo.setSortNo(t.getSortNo());
+            vo.setUsedCount(gameTypeRelMapper.selectCount(
+                    new LambdaQueryWrapper<GameTypeRel>().eq(GameTypeRel::getTypeId, t.getId())));
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
+    @Override
+    public Long createType(GameTypeSaveRequest request) {
+        String code = request.getCode().trim().toUpperCase(Locale.ROOT);
+        String name = request.getName().trim();
+        long dupCode = gameTypeMapper.selectCount(new LambdaQueryWrapper<GameType>()
+                .eq(GameType::getCode, code));
+        if (dupCode > 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "类型编码已存在：" + code,
+                    Map.of("code", "类型编码已存在"));
+        }
+        long dupName = gameTypeMapper.selectCount(new LambdaQueryWrapper<GameType>()
+                .eq(GameType::getName, name));
+        if (dupName > 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "类型名称已存在：" + name,
+                    Map.of("name", "类型名称已存在"));
+        }
+        GameType t = new GameType();
+        t.setCode(code);
+        t.setName(name);
+        t.setSortNo(request.getSortNo() == null ? 99 : request.getSortNo());
+        gameTypeMapper.insert(t);
+        auditLogService.record("GAME_TYPE", "CREATE", t.getId(), name, null, t);
+        return t.getId();
+    }
+
+    @Override
+    public void updateType(Long id, GameTypeSaveRequest request) {
+        GameType old = gameTypeMapper.selectById(id);
+        if (old == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "类型不存在：id=" + id);
+        }
+        String code = request.getCode().trim().toUpperCase(Locale.ROOT);
+        String name = request.getName().trim();
+        long dupCode = gameTypeMapper.selectCount(new LambdaQueryWrapper<GameType>()
+                .eq(GameType::getCode, code).ne(GameType::getId, id));
+        if (dupCode > 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "类型编码已存在：" + code,
+                    Map.of("code", "类型编码已存在"));
+        }
+        long dupName = gameTypeMapper.selectCount(new LambdaQueryWrapper<GameType>()
+                .eq(GameType::getName, name).ne(GameType::getId, id));
+        if (dupName > 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "类型名称已存在：" + name,
+                    Map.of("name", "类型名称已存在"));
+        }
+        GameType t = new GameType();
+        t.setId(id);
+        t.setCode(code);
+        t.setName(name);
+        t.setSortNo(request.getSortNo() == null ? old.getSortNo() : request.getSortNo());
+        gameTypeMapper.updateById(t);
+        auditLogService.record("GAME_TYPE", "UPDATE", id, name, old, gameTypeMapper.selectById(id));
+    }
+
+    @Override
+    public void deleteType(Long id) {
+        GameType old = gameTypeMapper.selectById(id);
+        if (old == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "类型不存在：id=" + id);
+        }
+        long used = gameTypeRelMapper.selectCount(
+                new LambdaQueryWrapper<GameTypeRel>().eq(GameTypeRel::getTypeId, id));
+        if (used > 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID,
+                    "该标签还有 " + used + " 个游戏在用，先去游戏里移除再删",
+                    Map.of("typeId", "仍有游戏在用"));
+        }
+        gameTypeMapper.deleteById(id);   // @TableLogic → 逻辑删除
+        auditLogService.record("GAME_TYPE", "DELETE", id, old.getName(), old, null);
     }
 
     @Override

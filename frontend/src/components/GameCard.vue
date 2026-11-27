@@ -17,6 +17,13 @@ const props = defineProps({
 const nameParts = computed(() => highlightParts(props.item.name, props.keyword))
 // 计算属性：将游戏类型名称进行高亮处理
 const typeParts = computed(() => highlightParts(props.item.gameTypeName, props.keyword))
+// 多标签：优先用 gameTypeNames（没有则回落到单个 gameTypeName）；卡片上最多展示 2 个，避免撑高
+const typeTags = computed(() => {
+  const names = props.item.gameTypeNames && props.item.gameTypeNames.length
+    ? props.item.gameTypeNames
+    : (props.item.gameTypeName ? [props.item.gameTypeName] : [])
+  return names.slice(0, 2)
+})
 
 // 格式化价格函数
 function formatPrice(v) {
@@ -54,11 +61,8 @@ function formatPrice(v) {
       </h3>
       <!-- 游戏元信息（类型和平台）：最多显示 2 个平台 + “+N”，且强制单行，防止标签换行把卡片撑高 -->
       <div class="meta">
-        <el-tag v-if="item.gameTypeName" size="small" type="info">
-          <span
-            v-for="(seg, i) in typeParts"
-            :key="i"
-            :class="{ hit: seg.hit }">{{ seg.text }}</span>
+        <el-tag v-for="t in typeTags" :key="t" size="small" type="info" style="margin-right: 4px">
+          {{ t }}
         </el-tag>
         <span v-for="p in (item.platforms || []).slice(0, 2)" :key="p.platformId" class="platform-tag">
           {{ p.name }}

@@ -120,3 +120,25 @@ export function backfillGameMeta(force = false) {
 export function backfillHeyboxLinks() {
   return request.post('/admin/games/heybox-links/backfill', null, { timeout: 60000 })
 }
+
+/* ---------- 游戏类型（标签）管理 ---------- */
+
+/** 后台类型列表（带 sortNo / usedCount） */
+export function adminListGameTypes() {
+  return request.get('/admin/game-types')
+}
+
+/** 新增类型（标签） */
+export function createGameType(data) {
+  return request.post('/admin/game-types', data)
+}
+
+/** 编辑类型 */
+export function updateGameType(id, data) {
+  return request.put(`/admin/game-types/${id}`, data)
+}
+
+/** 删除类型（逻辑删除，仍有游戏在用会拒绝） */
+export function deleteGameType(id) {
+  return request.delete(`/admin/game-types/${id}`)
+}

@@ -11,9 +11,11 @@ import com.gameprice.game.dto.SteamSearchItemVO;
 import com.gameprice.game.entity.Game;
 import com.gameprice.game.entity.GamePlatform;
 import com.gameprice.game.entity.GameType;
+import com.gameprice.game.entity.GameTypeRel;
 import com.gameprice.game.mapper.GameMapper;
 import com.gameprice.game.mapper.GamePlatformMapper;
 import com.gameprice.game.mapper.GameTypeMapper;
+import com.gameprice.game.mapper.GameTypeRelMapper;
 import com.gameprice.game.service.EpicLinkService;
 import com.gameprice.game.service.HeyboxLinkService;
 import com.gameprice.game.service.GameImportService;
@@ -74,6 +76,7 @@ public class GameImportServiceImpl implements GameImportService {
     private final GameMapper gameMapper;
     private final GamePlatformMapper gamePlatformMapper;
     private final GameTypeMapper gameTypeMapper;
+    private final GameTypeRelMapper gameTypeRelMapper;
     private final PlatformMapper platformMapper;
     private final AuditLogService auditLogService;
     private final EpicLinkService epicLinkService;
@@ -252,6 +255,13 @@ public class GameImportServiceImpl implements GameImportService {
         auditLogService.record("GAME", "LINK_UPDATE", game.getId(),
                 "game=" + game.getId() + " platform=" + platform.getCode() + "/" + platform.getRegion(),
                 before, after);
+
+        // 写入多标签关系（导入目前按 genres 建议一个主类型，之后可在后台再加标签）
+        GameTypeRel rel = new GameTypeRel();
+        rel.setGameId(game.getId());
+        rel.setTypeId(typeId);
+        gameTypeRelMapper.insert(rel);
+        game.setGameTypeIds(List.of(typeId));
 
         // 顺手挂小黑盒：小黑盒游戏页就是 Steam appId，纯本地拼 URL，无网络开销，直接同步建
         try {
@@ -450,4 +460,5 @@ public class GameImportServiceImpl implements GameImportService {
         }
     }
 }
+
 

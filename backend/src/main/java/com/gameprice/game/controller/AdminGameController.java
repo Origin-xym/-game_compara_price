@@ -3,7 +3,10 @@ package com.gameprice.game.controller;
 import com.gameprice.common.PageResult;
 import com.gameprice.common.Result;
 import com.gameprice.game.dto.GameSaveRequest;
+import com.gameprice.game.dto.SteamImportRequest;
+import com.gameprice.game.dto.SteamSearchItemVO;
 import com.gameprice.game.entity.Game;
+import com.gameprice.game.service.GameImportService;
 import com.gameprice.game.service.GameService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -11,6 +14,8 @@ import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * 后台游戏管理。挂在 /admin/** 上，AuthInterceptor(requireAdmin=true) 自动拦截（AC-11.5）。
@@ -28,6 +33,7 @@ import org.springframework.web.bind.annotation.*;
 public class AdminGameController {
 
     private final GameService gameService;
+    private final GameImportService gameImportService;
 
     /** GET /api/admin/games?page=1&size=10&keyword=赛博 */
     @GetMapping
@@ -56,6 +62,24 @@ public class AdminGameController {
     public Result<Long> create(@Valid @RequestBody GameSaveRequest request) {
         // 调用gameService的createGame方法创建游戏，并返回操作结果
         return Result.ok(gameService.createGame(request), "新增成功");
+    }
+
+    /**
+     * 按关键词搜索 Steam，返回可一键导入的候选（后台“Steam 搜索导入”弹窗用）
+     * GET /api/admin/games/steam-search?keyword=赛博朋克
+     */
+    @GetMapping("/steam-search")
+    public Result<List<SteamSearchItemVO>> steamSearch(@RequestParam String keyword) {
+        return Result.ok(gameImportService.searchSteam(keyword));
+    }
+
+    /**
+     * 按 appId 一键导入：建游戏 + 绑 Steam 平台链接（名称/英文名/封面/简介/年份全部自动带出）
+     * POST /api/admin/games/import-steam
+     */
+    @PostMapping("/import-steam")
+    public Result<Long> importSteam(@Valid @RequestBody SteamImportRequest request) {
+        return Result.ok(gameImportService.importFromSteam(request), "已从 Steam 导入");
     }
 
     /** PUT /api/admin/games/{id} */

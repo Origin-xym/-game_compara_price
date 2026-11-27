@@ -74,8 +74,11 @@ public class AlertServiceImpl implements AlertService {
         Long userId = UserContext.requireUserId();
 
         // 验证游戏是否存在且状态为启用
+        // 根据请求中的游戏ID查询游戏信息
         Game game = gameMapper.selectById(request.getGameId());
+        // 判断游戏是否存在或游戏状态是否不为1（可能是未开始、已结束等状态）
         if (game == null || !Integer.valueOf(1).equals(game.getStatus())) {
+            // 如果游戏不存在或状态不为1，则抛出游戏不存在的业务异常
             throw new BizException(ErrorCode.GAME_NOT_FOUND);
         }
 
@@ -85,8 +88,13 @@ public class AlertServiceImpl implements AlertService {
                 Collections.singletonList(request.getGameId()));
         // 如果请求中指定了平台ID，则进一步过滤价格列表，只保留指定平台的价格数据
         if (request.getPlatformId() != null) {
+            // 使用Stream API对prices列表进行过滤操作
+            // 只保留与请求中平台ID(platformId)相匹配的价格项
             prices = prices.stream()
+                    // 使用filter方法过滤列表，保留满足条件的元素
+                    // 条件是：请求中的平台ID与价格项中的平台ID相等
                     .filter(p -> request.getPlatformId().equals(p.getPlatformId()))
+                    // 将过滤后的结果收集到一个新的List中
                     .collect(Collectors.toList());
         }
         // 检查过滤后的价格列表是否为空，如果为空则抛出业务异常
@@ -111,10 +119,13 @@ public class AlertServiceImpl implements AlertService {
                 .eq(AlertRule::getGameId, request.getGameId())
                 // 设置查询条件：如果请求中的platformId不为null，则平台ID等于请求中的platformId
                 .eq(request.getPlatformId() != null, AlertRule::getPlatformId, request.getPlatformId())
-                .eq(AlertRule::getType, request.getType())
-                .eq(AlertRule::getStatus, 1));
-        if (exists > 0) {
-            throw new BizException(ErrorCode.ALERT_ALREADY_EXISTS);
+                // 使用MyBatis-Plus的链式调用方式，查询条件为：
+                // 告警规则类型等于请求中的类型，并且状态等于1
+                .eq(AlertRule::getType, request.getType())  // 设置第一个查询条件：类型匹配
+                .eq(AlertRule::getStatus, 1));              // 设置第二个查询条件：状态为1（启用状态）
+        // 检查是否存在记录，如果存在则抛出业务异常
+        if (exists > 0) {  // 如果exists变量大于0，表示记录已存在
+            throw new BizException(ErrorCode.ALERT_ALREADY_EXISTS);  // 抛出记录已存在的业务异常
         }
 
         // 类型相关校验（AC-10.1）

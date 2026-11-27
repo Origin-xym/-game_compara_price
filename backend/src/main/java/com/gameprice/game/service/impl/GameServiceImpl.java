@@ -163,9 +163,9 @@ public class GameServiceImpl implements GameService {
         // 检查关键词是否为空或空白
         if (raw == null || raw.isBlank()) {
             // 如果关键词为空或空白，将相关字段设置为null
-            query.setKeyword(null);
-            query.setKeywordNorm(null);
-            query.setKeywordTypeIds(null);
+            query.setKeyword(null);      // 设置关键字为null，表示不按关键字进行查询
+            query.setKeywordNorm(null);  // 设置关键字标准化值为null，不使用标准化关键字进行查询
+            query.setKeywordTypeIds(null); // 设置关键字类型ID集合为null，不按特定类型进行关键字查询
             return;
         }
         // 去除关键词前后的空白字符
@@ -327,7 +327,7 @@ public class GameServiceImpl implements GameService {
         List<CurrentPriceRow> rows = priceRecordMapper.selectCurrentPrices(
                 Collections.singletonList(gameId));
 
-// 创建一个GameDetailVO对象，用于封装游戏详细信息
+        // 创建一个GameDetailVO对象，用于封装游戏详细信息
         GameDetailVO vo = new GameDetailVO();
 
 

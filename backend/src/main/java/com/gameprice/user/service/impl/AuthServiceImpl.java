@@ -159,23 +159,23 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 成功：清空失败计数与锁定状态
-// 获取当前日期时间
+        // 获取当前日期时间
         LocalDateTime now = LocalDateTime.now();
-// 使用MyBatis-Plus的LambdaUpdateWrapper更新用户信息
-// 更新条件为null，表示根据其他条件更新
+        // 使用MyBatis-Plus的LambdaUpdateWrapper更新用户信息
+        // 更新条件为null，表示根据其他条件更新
         userMapper.update(null, new LambdaUpdateWrapper<SysUser>()
-        // 设置更新条件：用户ID等于传入的用户ID
+                // 设置更新条件：用户ID等于传入的用户ID
                 .eq(SysUser::getId, user.getId())
-        // 将登录失败次数重置为0
+                // 将登录失败次数重置为0
                 .set(SysUser::getFailedCount, 0)
-        // 将账户锁定时间设置为null（解除锁定）
+                // 将账户锁定时间设置为null（解除锁定）
                 .set(SysUser::getLockedUntil, null)
-        // 更新最后登录时间为当前时间
+                // 更新最后登录时间为当前时间
                 .set(SysUser::getLastLoginTime, now));
 
-// 记录用户登录成功的日志
+        // 记录用户登录成功的日志
         log.info("用户登录成功 id={} username={}", user.getId(), username);
-// 为用户生成并返回token
+        // 为用户生成并返回token
         return issueToken(user);
     }
 

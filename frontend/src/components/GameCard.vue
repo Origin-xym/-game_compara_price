@@ -91,6 +91,7 @@ function formatPrice(v) {
 .game-card {
   display: flex;
   flex-direction: column;
+  height: 100%;              /* 铺满 grid 行高，同一行卡片等高 */
   background: #fff;
   border: 1px solid #ebeef5;
   border-radius: 8px;
@@ -104,11 +105,12 @@ function formatPrice(v) {
 }
 /* 封面链接样式 */
 .cover-link { display: block; }
-/* 封面图片样式 */
+/* 封面图片样式：与 Steam header.jpg 的 460×215 一致，横图不再被裁切 */
 .cover {
   width: 100%;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 460 / 215;
   object-fit: cover;
+  object-position: center;
   display: block;
   background: #f5f7fa;
 }
@@ -120,8 +122,13 @@ function formatPrice(v) {
   color: #c0c4cc;
   font-size: 13px;
 }
-/* 主体内容区域样式 */
-.body { padding: 10px 12px 14px; }
+/* 主体内容区域样式：撑满剩余高度，价格行贴底 */
+.body {
+  padding: 10px 12px 14px;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
 /* 游戏名称样式 */
 .name {
   margin: 0 0 8px;
@@ -144,8 +151,8 @@ function formatPrice(v) {
   padding: 0 6px;
   line-height: 20px;
 }
-/* 价格信息行样式 */
-.price-line { margin-top: 10px; display: flex; align-items: baseline; gap: 2px; }
+/* 价格信息行样式：auto 外边距让价格始终贴住卡片底部 */
+.price-line { margin-top: auto; padding-top: 10px; display: flex; align-items: baseline; gap: 2px; }
 /* 价格符号样式 */
 .price-symbol { color: #f56c6c; font-size: 14px; }
 /* 价格数字样式 */

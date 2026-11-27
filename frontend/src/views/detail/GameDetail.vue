@@ -303,7 +303,7 @@ watch(() => route.params.id, (id) => {
 <style scoped>
 .detail-page { padding: 24px 0; min-height: 500px; }
 .head { display: flex; gap: 24px; }
-.cover { width: 220px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; background: #f5f7fa; }
+.cover { width: 320px; aspect-ratio: 460 / 215; object-fit: cover; object-position: center; border-radius: 8px; background: #f5f7fa; }
 .placeholder { display: flex; align-items: center; justify-content: center; color: #c0c4cc; }
 .info { flex: 1; }
 .info h1 { margin: 0; font-size: 24px; color: #303133; }

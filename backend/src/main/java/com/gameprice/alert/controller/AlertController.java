@@ -42,8 +42,10 @@ public class AlertController {
      *         Result中的data字段为AlertRuleVO类型的List集合
      */
     @GetMapping  // 映射HTTP GET请求
-    public Result<List<AlertRuleVO>> list() {  // 定义返回类型为Result，其中包含AlertRuleVO列表
-        return Result.ok(alertService.listMine());  // 调用alertService的listMine方法获取当前用户的告警规则列表，并封装为Result对象返回
+    // 定义返回类型为Result，其中包含AlertRuleVO列表
+    public Result<List<AlertRuleVO>> list() {
+        // 调用alertService的listMine方法获取当前用户的告警规则列表，并封装为Result对象返回
+        return Result.ok(alertService.listMine());
     }
 
     /** PUT /api/alerts/{id}/status?status=0 —— 暂停/恢复（AC-10.5） */

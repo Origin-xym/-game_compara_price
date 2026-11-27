@@ -254,6 +254,7 @@ onMounted(async () => {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  align-items: stretch;      /* 同一行卡片等高 */
   gap: 16px;
 }
 .pager { display: flex; justify-content: center; margin-top: 24px; }

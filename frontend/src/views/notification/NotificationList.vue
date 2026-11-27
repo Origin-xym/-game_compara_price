@@ -165,7 +165,7 @@ onMounted(fetchList)
   cursor: pointer;
 }
 .notice-item.unread { border-left: 3px solid #f56c6c; }
-.cover { width: 56px; height: 74px; object-fit: cover; border-radius: 4px; background: #f5f7fa; }
+.cover { width: 84px; aspect-ratio: 460 / 215; object-fit: cover; object-position: center; border-radius: 4px; background: #f5f7fa; }
 .placeholder { display: flex; align-items: center; justify-content: center; color: #c0c4cc; font-size: 12px; }
 .content { flex: 1; }
 .title { font-size: 15px; color: #303133; font-weight: 600; display: flex; align-items: center; gap: 6px; }

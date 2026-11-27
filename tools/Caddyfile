@@ -2,7 +2,13 @@
 	encode gzip
 
 	handle /api/* {
-		reverse_proxy 127.0.0.1:8081
+		reverse_proxy 127.0.0.1:8081 {
+			# 保留浏览器原始 Host，避免后端把带 Origin 的 POST 判成跨域
+			header_up Host {host}
+			# HTTPS 在 Cloudflare/Caddy 终结，后端只看到 http；把 Origin 归一化成 http://同一Host，
+			# 这样 Spring 的 CORS 判定会认为"同源"并直接放行 POST
+			header_up Origin "http://{host}"
+		}
 	}
 
 	handle {

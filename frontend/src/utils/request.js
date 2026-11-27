@@ -8,7 +8,7 @@ import { ElMessage } from 'element-plus'
 // Token存储的键名常量
 const TOKEN_KEY = 'gp_token'
 
-const request = axios.create({ baseURL: '/api', timeout: 10000 })
+const request = axios.create({ baseURL: '/api', timeout: 30000 })
 
 /**
  * 重定向到登录页面的函数
